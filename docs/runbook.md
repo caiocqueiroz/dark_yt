@@ -57,6 +57,21 @@ destacada, marca PAVANATO AGORA, áudio normalizado). Venv, modelos e vídeos em
 Python precisa da permissão "Volumes Removíveis" (ou Acesso Total ao Disco), senão trava
 no boot lendo o venv.
 
+## Vídeo longo (16:9)
+
+```bash
+scripts/run-longform.sh '<url>' --subject 'Nome' --mode best_of --minutes 5      # melhores momentos
+scripts/run-longform.sh '<url>' --subject 'Nome' --mode continuous --minutes 8   # corte contínuo
+```
+Workflow `RADAR PATRIOTA - 02 - LONGFORM`: planner (abertura + segmentos + capítulos) → revisão de
+fidelidade (só bloqueia o que muda o sentido) → legendas revisadas → metadados → render 1920×1080
+(cartão de título, tarjas de capítulo, legendas acima de marcas d'água, "inscreva-se") → descrição com
+capítulos → upload PRIVATE + thumbnail (1280×720). Linha na tabela: `<id>:long`.
+
+**Fotos de referência (rosto):** `/Volumes/MacNVMe/pavanatto-cuts/assets/people/<nome-slug>/*.jpg`
+(2–3 fotos nítidas, de frente). Usadas para a thumbnail e a foto do topo dos Shorts mostrarem a pessoa
+certa. Sem fotos, cai no "rosto que está falando".
+
 ## LLM bridge (Claude / Codex sem API key)
 
 `bridge/server.mjs` expõe os CLIs `claude` e `codex` (logados nas assinaturas Pro) como

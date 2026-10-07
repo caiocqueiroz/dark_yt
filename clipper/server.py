@@ -51,6 +51,7 @@ DOWNLOADS_DIR = Path(cfg('DOWNLOADS_DIR', str(ROOT / 'downloads')))  # mounted a
 os.environ.setdefault('CLIPPER_CACHE', cfg('CLIPPER_CACHE', '/Volumes/MacNVMe/pavanatto-cuts/clipper-cache'))
 os.environ.setdefault('HF_HOME', os.path.join(os.environ['CLIPPER_CACHE'], 'hf'))
 
+import longform  # noqa: E402
 import pipeline  # noqa: E402  (after env setup)
 
 JOBS_DIR = WORK_DIR / 'jobs'
@@ -130,6 +131,23 @@ def do_render(params: dict) -> dict:
     clip_id = re.sub(r'[^A-Za-z0-9_-]', '', str(params.get('clip_id', 'clip')))[:60] or 'clip'
     name = f"{time.strftime('%Y-%m-%d')}_{clip_id}.mp4"
     out = DOWNLOADS_DIR / name
+    if params.get('template') == 'longform':
+        res = longform.render(workdir, tr, parts, out,
+                              headline_kicker=str(params.get('headline_kicker') or 'ASSISTA!')[:20],
+                              headline_text=str(params.get('headline_text') or '')[:60],
+                              theme=str(params.get('theme') or 'brasil'),
+                              brand=str(params.get('brand_name') or pipeline.BRAND_NAME)[:40],
+                              source_label=str(params.get('source_label') or '')[:40],
+                              sentence_fixes={str(k): str(v)[:1000] for k, v in (params.get('sentence_fixes') or {}).items()
+                                              if str(k).isdigit() and int(k) < n},
+                              cover_band=cover, captions=params.get('captions', True) is not False,
+                              thumbnail_time=(tr['sentences'][int(params['thumbnail_sentence_id'])]['start'] + 0.5
+                                              if str(params.get('thumbnail_sentence_id', '')).isdigit()
+                                              and int(params['thumbnail_sentence_id']) < n else None),
+                              subject=str(params.get('subject') or '')[:80])
+        thumb = Path(res['thumbnail'])
+        return {**res, 'file_name': name, 'container_path': f'/files/{name}',
+                'thumbnail_container_path': f'/files/{thumb.name}'}
     res = pipeline.render(workdir, tr, parts, out,
                           context_text=(params.get('context_text') or '').strip()[:140] or None,
                           cover_band=cover,
@@ -141,7 +159,8 @@ def do_render(params: dict) -> dict:
                           headline_kicker=str(params.get('headline_kicker') or '')[:20],
                           headline_text=str(params.get('headline_text') or '')[:60],
                           theme=str(params.get('theme') or 'brasil'),
-                          top_image_path=safe_asset(params.get('top_image')))
+                          top_image_path=safe_asset(params.get('top_image')),
+                          subject=str(params.get('subject') or '')[:80])
     return {**res, 'file_name': name, 'container_path': f'/files/{name}'}
 
 

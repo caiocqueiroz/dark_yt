@@ -342,7 +342,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ video_id: $json.source_video_id, clip_id: $json.clip_id, parts: $json.parts, context_text: $json.question ? '' : $json.context_text, cover_band: 'auto', source_label: $json.source_channel, sentence_fixes: $json.sentence_fixes, brand_name: $('CONFIG').first().json.channel_name, template: $('CONFIG').first().json.template, theme: $json.theme, headline_kicker: $json.headline_kicker, headline_text: $json.headline_text }) }}"
+        "jsonBody": "={{ JSON.stringify({ video_id: $json.source_video_id, clip_id: $json.clip_id, parts: $json.parts, context_text: $json.question ? '' : $json.context_text, cover_band: 'auto', source_label: $json.source_channel, sentence_fixes: $json.sentence_fixes, brand_name: $('CONFIG').first().json.channel_name, subject: $('CONFIG').first().json.subject_name, template: $('CONFIG').first().json.template, theme: $json.theme, headline_kicker: $json.headline_kicker, headline_text: $json.headline_text }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {

@@ -10,6 +10,10 @@ for f in workflows/*.json; do
   docker exec pavanatto-n8n n8n import:workflow --input=/tmp/wf.json >/dev/null
   docker exec pavanatto-n8n n8n publish:workflow --id="$id" | tail -1
 done
-docker compose restart >/dev/null 2>&1
-for i in $(seq 1 30); do curl -sf http://127.0.0.1:5678/healthz >/dev/null && break; sleep 2; done
+# Two restarts: right after the first one, n8n has served the previously published version once.
+for r in 1 2; do
+  docker compose restart >/dev/null 2>&1
+  for i in $(seq 1 30); do curl -sf http://127.0.0.1:5678/healthz >/dev/null && break; sleep 2; done
+  sleep 3
+done
 echo "deployed"

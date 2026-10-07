@@ -67,3 +67,14 @@ diarização (o finder infere o falante pelo contexto, o reframe usa movimento d
   ou `alerta` (vermelho) para URGENTE!/BOMBA!. Letreiro da emissora é recortado fora.
 - Manchete gerada pela IA a partir de lista controlada (sem "EXCLUSIVO!"), atribuível à fala.
 - `template: classic` mantém o formato tela cheia anterior.
+
+## D5 — Template de vídeo longo + identificação facial (2026-10-07)
+
+- Formato 16:9 (referência: vídeos do próprio canal do Pavanato): modos `best_of` e `continuous`,
+  abertura de impacto (opcional, a revisão pode vetar), cartão de título com a faixa do canal,
+  tarjas de capítulo, capítulos na descrição a partir dos tempos reais do render, thumbnail própria.
+- Revisão de fidelidade em dois níveis: `block` (muda o sentido / atribuição errada / ordem que
+  sugere o que não aconteceu) remove o segmento; o resto vira aviso e título neutro/atribuído.
+- Marcas d'água do criador (ex.: @handle) são detectadas (pixels estáticos entre cenas) e as
+  legendas ficam acima delas; não removemos crédito de terceiros.
+- Rosto: OpenCV YuNet + SFace contra fotos de referência por pessoa (similaridade ≥ 0,40).

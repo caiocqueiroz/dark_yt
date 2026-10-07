@@ -1,0 +1,1507 @@
+{
+  "id": "radarLongform02",
+  "name": "RADAR PATRIOTA - 02 - LONGFORM",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "errorWorkflow": "pavanatoErrors99"
+  },
+  "nodes": [
+    {
+      "id": "lf00",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "lf01",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        500
+      ],
+      "webhookId": "0b6f7d1e-2c41-4f7e-9a51-radarlongfrm",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "radar-longform",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      }
+    },
+    {
+      "id": "lf02",
+      "name": "CONFIG",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Edit these values for each manual run.\nconst config = {\n  source_url: 'https://www.youtube.com/watch?v=Sn3H5UzsDoY',\n  pilot: true,\n  force_reprocess: false,\n  // Pilot only: if no clip reaches SCORING_V1, continue with the best non-HIGH clip as REVIEW.\n  allow_below_threshold: true,\n  max_candidates: 10,\n  // Long-form: 'best_of' (highlights in chronological order) | 'continuous' (one long stretch).\n  mode: 'best_of',\n  target_minutes: 5,\n  upload: true, // false = stop after render + metadata (testing)\n  // Channel and the person this run is about (override per run via webhook body).\n  channel_name: 'Radar Patriota',\n  template: 'longform',\n  subject_name: 'Lucas Pavanato',\n  subject_notes: 'Grafia correta: Pavanato (um T). Deputado federal eleito por São Paulo (PL), ex-vereador.',\n  subject_misspellings: ['Pavanatto'],\n};\n\n// Webhook runs (scripts/run-pilot.sh) override the defaults above.\nlet body = {};\ntry { body = $('Webhook').first().json.body || {}; } catch { /* manual run */ }\nif (body.source_url) config.source_url = String(body.source_url);\nif (body.force_reprocess !== undefined) config.force_reprocess = body.force_reprocess === true || body.force_reprocess === 'true';\nfor (const k of ['subject_name', 'subject_notes', 'channel_name', 'template']) if (body[k]) config[k] = String(body[k]);\nif (Array.isArray(body.subject_misspellings)) config.subject_misspellings = body.subject_misspellings.map(String);\nif (['best_of', 'continuous'].includes(body.mode)) config.mode = body.mode;\nif (Number(body.target_minutes) > 0) config.target_minutes = Math.min(25, Number(body.target_minutes));\nif (body.upload !== undefined) config.upload = body.upload === true || body.upload === 'true';\nif (body.allow_below_threshold !== undefined) config.allow_below_threshold = body.allow_below_threshold === true || body.allow_below_threshold === 'true';\n\nconst m = config.source_url.match(/(?:v=|youtu\\.be\\/|shorts\\/|live\\/)([A-Za-z0-9_-]{11})/);\nif (!m) throw new Error('CONFIG_INVALID: could not extract YouTube video id from source_url');\n\nreturn [{ json: { ...config, source_video_id: m[1], started_at: new Date().toISOString() } }];"
+      }
+    },
+    {
+      "id": "lf03",
+      "name": "ENSURE TABLE",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        500
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "processed_videos",
+        "columns": {
+          "column": [
+            {
+              "name": "youtube_id",
+              "type": "string"
+            },
+            {
+              "name": "source_url",
+              "type": "string"
+            },
+            {
+              "name": "source_channel",
+              "type": "string"
+            },
+            {
+              "name": "source_title",
+              "type": "string"
+            },
+            {
+              "name": "published_at",
+              "type": "string"
+            },
+            {
+              "name": "discovered_at",
+              "type": "date"
+            },
+            {
+              "name": "execution_id",
+              "type": "string"
+            },
+            {
+              "name": "best_clip_id",
+              "type": "string"
+            },
+            {
+              "name": "editorial_score",
+              "type": "number"
+            },
+            {
+              "name": "editorial_risk",
+              "type": "string"
+            },
+            {
+              "name": "below_threshold",
+              "type": "boolean"
+            },
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "video_file",
+              "type": "string"
+            },
+            {
+              "name": "youtube_output_id",
+              "type": "string"
+            },
+            {
+              "name": "status",
+              "type": "string"
+            },
+            {
+              "name": "error_reason",
+              "type": "string"
+            },
+            {
+              "name": "created_at",
+              "type": "date"
+            },
+            {
+              "name": "updated_at",
+              "type": "date"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": true
+        }
+      }
+    },
+    {
+      "id": "lf04",
+      "name": "LOOKUP VIDEO",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        500
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "processed_videos"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "youtube_id",
+              "condition": "eq",
+              "keyValue": "={{ $('CONFIG').first().json.source_video_id + ':long' }}"
+            }
+          ]
+        },
+        "returnAll": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "lf05",
+      "name": "IDEMPOTENCY",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        500
+      ],
+      "parameters": {
+        "jsCode": "// Idempotency (docs/plan.md §31): skip videos already in flight or published, unless forced.\nconst config = $('CONFIG').first().json;\nconst row = $input.all().map((i) => i.json).find((r) => r.youtube_id === `${config.source_video_id}:long`);\nconst STALE_MS = 2 * 60 * 60 * 1000; // a PROCESSING row older than this is a crashed run\nconst now = new Date();\n// Test runs (upload=false) never touch the real row and skip the duplicate check.\nconst key = `${config.source_video_id}:long` + (config.upload ? '' : ':dryrun');\nif (config.upload && row && !config.force_reprocess) {\n  const active = ['PROCESSING', 'CLIPPED', 'SELECTED'].includes(row.status);\n  const stale = active && now - new Date(row.updated_at) > STALE_MS;\n  if (row.status === 'UPLOADED' || (active && !stale)) {\n    console.log(`SKIPPED_DUPLICATE: ${config.source_video_id} is ${row.status} (youtube_output_id=${row.youtube_output_id || '-'})`);\n    return [];\n  }\n}\nreturn [{ json: {\n  youtube_id: key,\n  source_url: config.source_url,\n  execution_id: String($execution.id),\n  status: 'PROCESSING',\n  error_reason: '',\n  discovered_at: row?.discovered_at ?? now.toISOString(),\n  created_at: row?.created_at ?? now.toISOString(),\n  updated_at: now.toISOString(),\n} }];"
+      }
+    },
+    {
+      "id": "lf06",
+      "name": "MARK PROCESSING",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        500
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "processed_videos"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "youtube_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.youtube_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "lf07",
+      "name": "CLIPPER PREPARE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8788/v1/prepare",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source_url: $('CONFIG').first().json.source_url, subject: $('CONFIG').first().json.subject_name }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "lf08",
+      "name": "CHECK PREPARE SUBMIT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nif (!res?.job_id) throw new Error(`CLIPPER_SUBMIT_FAILED: ${JSON.stringify(res).slice(0, 300)}`);\nreturn [{ json: { ...$('CONFIG').first().json, job_id: res.job_id } }];"
+      }
+    },
+    {
+      "id": "lf09",
+      "name": "WAIT PREPARE",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        300
+      ],
+      "webhookId": "pavanatto-b3-lf",
+      "parameters": {
+        "amount": 30
+      }
+    },
+    {
+      "id": "lf10",
+      "name": "PREPARE STATUS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://host.docker.internal:8788/v1/jobs/{{ $json.job_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "lf11",
+      "name": "CHECK PREPARE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Polls a clipper job; loops back to WAIT PREPARE while queued/running.\nconst MAX_POLLS = 120;\nconst res = $input.first().json;\nconst ctx = $('WAIT PREPARE').first().json;\nconst poll = $runIndex + 1;\n\nif (res?.status === 'queued' || res?.status === 'running') {\n  if (poll >= MAX_POLLS) throw new Error(`CLIPPER_TIMEOUT: job ${ctx.job_id} still ${res.status} after ${poll} polls`);\n  return [{ json: { ...ctx, job_status: res.status, polls: poll } }];\n}\nif (res?.status === 'done' && res.result) {\n  return [{ json: { ...ctx, job_status: 'done', polls: poll, result: res.result } }];\n}\nthrow new Error(`${res?.error_code ?? 'CLIPPER_FAILED'}: ${res?.error_message ?? JSON.stringify(res).slice(0, 300)}`);"
+      }
+    },
+    {
+      "id": "lf12",
+      "name": "Prepared?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cb6",
+              "leftValue": "={{ $json.job_status }}",
+              "rightValue": "done",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "lf13",
+      "name": "BUILD PROOFREAD REQUEST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const S = $('CONFIG').first().json; // channel_name, subject_name, subject_notes\n// Proofreads the captions of the selected clip: only evident ASR errors, never style or meaning.\nconst clip = $input.first().json;\nconst prep = $('BUILD PLAN REQUEST').first().json.result;\nconst ids = new Set();\nfor (const p of clip.parts) for (let i = p.start_id; i <= p.end_id; i++) ids.add(i);\nconst sentences = prep.sentences.filter((s) => ids.has(s.id));\nconst around = prep.sentences.filter((s) => s.id >= Math.min(...ids) - 4 && s.id < Math.min(...ids));\n\nconst SYSTEM = `Você revisa legendas geradas por transcrição automática (Whisper) de um vídeo em português.\nPessoa principal do vídeo: ${S.subject_name} (${S.subject_notes}).\n\nCorrija SOMENTE erros evidentes de transcrição: nomes próprios, números, datas, siglas,\ninstituições, e palavras trocadas por outras de som parecido que o CONTEXTO deixa claro\n(ex.: \"presos do Rio de Janeiro\" quando o assunto são os presos do 8 de janeiro).\n\nNÃO reescreva o estilo, NÃO corrija a gramática da fala, NÃO remova hesitações ou repetições,\nNÃO resuma, NÃO mude o sentido. Na dúvida, não corrija.\n\nRetorne apenas as frases que precisam de correção, com o texto COMPLETO corrigido da frase,\ne em \"changes\" descreva cada troca no formato \"antes → depois\".`;\n\nconst schema = {\n  type: 'object', additionalProperties: false, required: ['fixes'],\n  properties: { fixes: { type: 'array', items: {\n    type: 'object', additionalProperties: false, required: ['id', 'text', 'changes'],\n    properties: { id: { type: 'integer' }, text: { type: 'string' }, changes: { type: 'array', items: { type: 'string' } } },\n  } } },\n};\n\nreturn [{ json: { ...clip, request: { provider: 'auto', system: SYSTEM, schema, prompt:\n`VÍDEO: \"${prep.title}\" — ${prep.channel}\n\nCONTEXTO (frases ao redor, não corrigir):\n${around.map((s) => `[${s.id}] ${s.text}`).join('\\n')}\n\nFRASES A REVISAR:\n${sentences.map((s) => `[${s.id}] ${s.text}`).join('\\n')}` } } }];"
+      }
+    },
+    {
+      "id": "lf14",
+      "name": "AI PROOFREAD",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3300,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8787/v1/complete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 600000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      }
+    },
+    {
+      "id": "lf15",
+      "name": "APPLY PROOFREAD",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Applies proofreading fixes (only to sentences of this clip). Failures are logged, not fatal.\nconst res = $input.first().json;\nconst { request, ...clip } = $('BUILD PROOFREAD REQUEST').first().json;\nconst ids = new Set();\nfor (const p of clip.parts) for (let i = p.start_id; i <= p.end_id; i++) ids.add(i);\nconst fixes = {};\nconst changes = [];\nif (res?.ok && Array.isArray(res.json?.fixes)) {\n  for (const f of res.json.fixes) {\n    if (!ids.has(f.id) || !f.text?.trim()) continue;\n    fixes[String(f.id)] = f.text.trim();\n    changes.push(...(f.changes || []).map((c) => `[${f.id}] ${c}`));\n  }\n} else {\n  console.log(`PROOFREAD_SKIPPED: ${res?.error_code ?? 'no response'} ${res?.error_message ?? ''}`);\n}\nconsole.log(JSON.stringify({ proofread_changes: changes }));\nreturn [{ json: { ...clip, sentence_fixes: fixes, proofread_changes: changes } }];"
+      }
+    },
+    {
+      "id": "lf16",
+      "name": "BUILD METADATA REQUEST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4840,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const S = $('CONFIG').first().json; // channel_name, subject_name, subject_notes\n// Title + description (docs/plan.md §24-25) in a single call.\nconst clip = $input.first().json;\nconst SYSTEM = `Você é editor de vídeos longos (16:9) do canal independente e não oficial \"${S.channel_name}\",\nque publica trechos de declarações públicas. Este vídeo é de ${S.subject_name} (${S.subject_notes}).\n\nTÍTULO\n- Alta retenção, despertando curiosidade SEM inventar fatos e sem alterar o significado da fala.\n- Prefira: curiosidade, contraste, resposta, surpresa, conflito real, assunto atual, afirmação\n  forte realmente existente no vídeo.\n- Evite: clickbait falso, caixa alta excessiva, afirmações não presentes, insultos, inferências\n  sobre intenção, propaganda política personalizada.\n- Máximo 80 caracteres. Sem hashtags no título. Crie 5 opções e escolha a melhor.\n\nDESCRIÇÃO\n- Máximo 600 caracteres, 2 parágrafos curtos: o que acontece no vídeo e por que assistir. NÃO inclua URL, linha de fonte, aviso de canal nem hashtags:\n  isso é adicionado automaticamente depois.\n- Explique brevemente o contexto, deixe claro que é um trecho, identifique a fonte original,\n  não atribua nada que não tenha sido dito, tom editorial.\n\nMANCHETE (cartão de título no início do vídeo e thumbnail):\n- headline_kicker: UMA expressão de impacto, escolha a que combina com a fala:\n  \"EITA!\", \"OLHA ISSO!\", \"ATENÇÃO!\", \"CONCORDA?\", \"POLÊMICA!\", \"SINCERÃO!\", \"RESPONDEU!\",\n  \"URGENTE!\" (só se o tema for notícia do dia), \"BOMBA!\" (só se a fala revela algo novo e grave).\n  Nunca use \"EXCLUSIVO!\".\n- headline_text: até 32 caracteres, caixa alta, sujeito + verbo forte, ATRIBUÍVEL à fala\n  (ex.: \"PAVANATO DETONA O PT\", \"PAVANATO RESPONDE JORNALISTA\"). Pode ser enfático, mas não pode\n  afirmar fato que não está na fala nem acusar alguém de crime.\n\nTAGS: 5 a 8 tags curtas em português (sem #).\nHASHTAGS: 3 a 5, sem espaços, começando com #; não inclua #${S.subject_name.replace(/\\s+/g, '')} (já entra).`;\n\nconst schema = {\n  type: 'object', additionalProperties: false,\n  required: ['title', 'alternatives', 'hook', 'description', 'tags', 'hashtags', 'headline_kicker', 'headline_text'],\n  properties: {\n    title: { type: 'string' }, alternatives: { type: 'array', items: { type: 'string' } },\n    hook: { type: 'string' }, description: { type: 'string' },\n    tags: { type: 'array', items: { type: 'string' } }, hashtags: { type: 'array', items: { type: 'string' } },\n    headline_kicker: { type: 'string' }, headline_text: { type: 'string' },\n  },\n};\nreturn [{ json: { ...clip, request: { provider: 'auto', system: SYSTEM, schema, prompt:\n`FONTE: ${clip.source_channel} — \"${clip.source_title}\"\nURL: ${clip.source_url}\n\nCONTEXTO: ${clip.context_text || '-'}\nPERGUNTA INCLUÍDA: ${clip.question || '-'}\nASSUNTO: ${clip.main_topic}\n\nRESUMO: ${clip.summary}\nCAPÍTULOS: ${clip.parts.filter((p) => p.role === 'segment').map((p) => p.chapter).join(' | ')}\n\nTRANSCRIÇÃO DOS TRECHOS:\n${clip.transcript}` } } }];"
+      }
+    },
+    {
+      "id": "lf17",
+      "name": "AI METADATA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5060,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8787/v1/complete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 600000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      }
+    },
+    {
+      "id": "lf18",
+      "name": "VALIDATE METADATA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5280,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const S = $('CONFIG').first().json; // channel_name, subject_name, subject_notes\n// Validates metadata and appends the mandatory source/notice lines (never left to the LLM).\nconst res = $input.first().json;\nconst { request, ...clip } = $('BUILD METADATA REQUEST').first().json;\nif (!res?.ok || !res.json?.title) throw new Error(`${res?.error_code ?? 'LLM_INVALID_JSON'}: metadata ${res?.error_message ?? 'missing title'}`);\nconst m = res.json;\n\nconst clean = (s) => String(s || '').replace(/[<>]/g, '').replace(/\\s+/g, ' ').trim();\nlet title = clean(m.title).replace(/#\\S+/g, '').trim();\nif (!title) throw new Error('LLM_INVALID_JSON: empty title');\nif (title.length > 100) title = title.slice(0, 97).replace(/\\s+\\S*$/, '') + '...';\nconst bad = (S.subject_misspellings || []).find((x) => new RegExp(`\\\\b${x}\\\\b`, 'i').test(title + ' ' + m.description));\nif (bad) throw new Error(`METADATA_INVALID: misspelled name (${bad})`);\n\nconst tag = (h) => '#' + String(h).replace(/^#/, '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9_]/g, '');\nconst subjectTag = tag(S.subject_name);\nconst extra = [...new Set((m.hashtags || []).map(tag))].filter((h) => h.length > 2 && h !== subjectTag && h.toLowerCase() !== '#shorts');\nconst hashtags = [subjectTag, ...extra.slice(0, 4)];\n// The source line is added below; drop any \"Fonte...\" sentence the model wrote anyway.\nlet body = clean(m.description).replace(/(^|\\s)Fonte( original)?\\s*:.*?(\\.(?=\\s|$)|$)/gi, ' ').replace(/\\s+/g, ' ').trim();\nif (body.length > 900) body = body.slice(0, 897).replace(/\\s+\\S*$/, '') + '...';\nconst descriptionParts = { body, source: `Fonte: ${clip.source_channel} — ${clip.source_url}`, note: `Trecho editado. ${S.channel_name} é um canal independente, sem vínculo com as pessoas exibidas.`, hashtags: hashtags.join(' ') };\nconst description = [\n  body,\n  '',\n  `Fonte: ${clip.source_channel} — ${clip.source_url}`,\n  `Trecho editado. ${S.channel_name} é um canal independente, sem vínculo com as pessoas exibidas.`,\n  '',\n  hashtags.join(' '),\n].join('\\n');\nconst tags = [...new Set([S.subject_name, S.subject_name.split(' ').slice(-1)[0], S.channel_name, ...(m.tags || []).map(clean)])].filter(Boolean).slice(0, 12);\n\n// On-video headline: controlled kicker list, short attributable line, theme by urgency.\nconst KICKERS = ['EITA!', 'OLHA ISSO!', 'ATENÇÃO!', 'CONCORDA?', 'POLÊMICA!', 'SINCERÃO!', 'RESPONDEU!', 'URGENTE!', 'BOMBA!'];\nlet kicker = clean(m.headline_kicker).toUpperCase();\nif (!KICKERS.includes(kicker)) kicker = 'EITA!';\nlet headline = clean(m.headline_text).toUpperCase().replace(/#\\S+/g, '').trim();\nif (!headline) headline = title.toUpperCase();\nif (headline.length > 34) headline = headline.slice(0, 34).replace(/\\s+\\S*$/, '');\nconst theme = ['URGENTE!', 'BOMBA!'].includes(kicker) ? 'alerta' : 'brasil';\n\nreturn [{ json: { ...clip, descriptionParts, headline_kicker: kicker, headline_text: headline, theme, title, title_alternatives: m.alternatives, hook: m.hook, description, tags } }];"
+      }
+    },
+    {
+      "id": "lf19",
+      "name": "CLIPPER RENDER",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3300,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8788/v1/render",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ video_id: $json.source_video_id, clip_id: $json.clip_id, parts: $json.parts.map((p) => ({ start_id: p.start_id, end_id: p.end_id, role: p.role, chapter: p.chapter, skip_words_start: p.skip_words_start, skip_words_end: p.skip_words_end })), cover_band: 'auto', source_label: $json.source_channel, sentence_fixes: $json.sentence_fixes, brand_name: $('CONFIG').first().json.channel_name, subject: $('CONFIG').first().json.subject_name, template: 'longform', theme: $json.theme, headline_kicker: $json.headline_kicker, headline_text: $json.headline_text, thumbnail_sentence_id: $json.thumbnail_sentence_id }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "lf20",
+      "name": "CHECK RENDER SUBMIT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nif (!res?.job_id) throw new Error(`RENDER_SUBMIT_FAILED: ${JSON.stringify(res).slice(0, 300)}`);\nreturn [{ json: { ...$('VALIDATE METADATA').first().json, job_id: res.job_id } }];"
+      }
+    },
+    {
+      "id": "lf21",
+      "name": "WAIT RENDER",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3740,
+        200
+      ],
+      "webhookId": "pavanatto-c3-lf",
+      "parameters": {
+        "amount": 20
+      }
+    },
+    {
+      "id": "lf22",
+      "name": "RENDER STATUS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3960,
+        200
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://host.docker.internal:8788/v1/jobs/{{ $json.job_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "lf23",
+      "name": "CHECK RENDER",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Polls a clipper job; loops back to WAIT RENDER while queued/running.\nconst MAX_POLLS = 120;\nconst res = $input.first().json;\nconst ctx = $('WAIT RENDER').first().json;\nconst poll = $runIndex + 1;\n\nif (res?.status === 'queued' || res?.status === 'running') {\n  if (poll >= MAX_POLLS) throw new Error(`RENDER_TIMEOUT: job ${ctx.job_id} still ${res.status} after ${poll} polls`);\n  return [{ json: { ...ctx, job_status: res.status, polls: poll } }];\n}\nif (res?.status === 'done' && res.result) {\n  return [{ json: { ...ctx, job_status: 'done', polls: poll, result: res.result } }];\n}\nthrow new Error(`${res?.error_code ?? 'RENDER_FAILED'}: ${res?.error_message ?? JSON.stringify(res).slice(0, 300)}`);"
+      }
+    },
+    {
+      "id": "lf24",
+      "name": "Rendered?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4400,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cc6",
+              "leftValue": "={{ $json.job_status }}",
+              "rightValue": "done",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "lf25",
+      "name": "DONE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Final description with YouTube chapters (first at 00:00, >= 3 entries, >= 10s each).\nconst ctx = $input.first().json;\nconst { result, job_id, job_status, polls, ...clip } = ctx;\nif (result.width !== 1920 || result.height !== 1080) throw new Error(`RENDER_FAILED: unexpected size ${result.width}x${result.height}`);\nconst ts = (s) => { s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;\n  return (h ? `${h}:${String(m).padStart(2, '0')}` : `${String(m).padStart(2, '0')}`) + `:${String(x).padStart(2, '0')}`; };\nlet chapters = result.chapters.map((c) => ({ title: c.title, start: c.start }));\nif (!chapters.length || chapters[0].start > 0) chapters = [{ title: 'Abertura', start: 0 }, ...chapters];\nchapters = chapters.filter((c, i, a) => i === 0 || c.start - a[i - 1].start >= 10);\nconst d = clip.descriptionParts;\nconst description = [d.body, '', ...(chapters.length >= 3 ? ['Capítulos:', ...chapters.map((c) => `${ts(c.start)} ${c.title}`), ''] : []),\n  d.source, d.note, '', d.hashtags].join('\\n').slice(0, 4900);\nreturn [{ json: { ...clip, description, chapters, video_file: result.container_path, video_file_name: result.file_name,\n  thumbnail_file: result.thumbnail_container_path,\n  render: { width: result.width, height: result.height, duration: result.duration } } }];"
+      }
+    },
+    {
+      "id": "lf26",
+      "name": "SELECTED ROW",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5390,
+        250
+      ],
+      "parameters": {
+        "jsCode": "const c = $input.first().json;\nreturn [{ json: {\n  youtube_id: `${c.source_video_id}:long` + ($('CONFIG').first().json.upload ? '' : ':dryrun'), source_channel: c.source_channel, source_title: c.source_title,\n  best_clip_id: c.clip_id, editorial_score: c.score, editorial_risk: c.risk, below_threshold: !!c.below_threshold,\n  title: c.title, video_file: c.video_file, status: $('CONFIG').first().json.upload ? 'SELECTED' : 'DRY_RUN', updated_at: new Date().toISOString(),\n} }];"
+      }
+    },
+    {
+      "id": "lf27",
+      "name": "MARK SELECTED",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        5500,
+        250
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "processed_videos"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "youtube_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.youtube_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "lf28",
+      "name": "Upload?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5610,
+        250
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cu",
+              "leftValue": "={{ $('CONFIG').first().json.upload }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "lf29",
+      "name": "READ MP4",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        5720,
+        100
+      ],
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ $('DONE').first().json.video_file }}",
+        "options": {
+          "dataPropertyName": "video"
+        }
+      }
+    },
+    {
+      "id": "lf30",
+      "name": "YOUTUBE UPLOAD PRIVATE",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        5940,
+        100
+      ],
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{ $('VALIDATE METADATA').first().json.title }}",
+        "regionCode": "BR",
+        "categoryId": "25",
+        "binaryProperty": "video",
+        "options": {
+          "description": "={{ $('DONE').first().json.description }}",
+          "privacyStatus": "private",
+          "tags": "={{ $('VALIDATE METADATA').first().json.tags.join(',') }}",
+          "defaultLanguage": "pt",
+          "selfDeclaredMadeForKids": false,
+          "notifySubscribers": false,
+          "embeddable": true
+        }
+      },
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "youtubeOAuth00001",
+          "name": "YouTube (Radar Patriota)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 10000
+    },
+    {
+      "id": "lf31",
+      "name": "CHECK UPLOAD",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6160,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst meta = $('VALIDATE METADATA').first().json;\nconst id = res?.id ?? res?.uploadId;\nif (!id) throw new Error(`YOUTUBE_UPLOAD_FAILED: ${JSON.stringify(res).slice(0, 300)}`);\nconsole.log(`UPLOADED https://youtu.be/${id}`);\nreturn [{ json: {\n  youtube_id: `${meta.source_video_id}:long`, youtube_output_id: id, status: 'UPLOADED', error_reason: '',\n  updated_at: new Date().toISOString(),\n} }];"
+      }
+    },
+    {
+      "id": "lf32",
+      "name": "MARK UPLOADED",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        6380,
+        100
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "processed_videos"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "youtube_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.youtube_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "lf33",
+      "name": "RESULT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6600,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const meta = $('VALIDATE METADATA').first().json;\nconst up = $('CHECK UPLOAD').first().json;\nconst thumbErr = $('THUMB ROW').first().json.error_reason;\nreturn [{ json: {\n  status: 'UPLOADED', thumbnail: thumbErr || 'ok', chapters: $('DONE').first().json.chapters, youtube_url: `https://youtu.be/${up.youtube_output_id}`, studio_url: `https://studio.youtube.com/video/${up.youtube_output_id}/edit`,\n  title: meta.title, description: $('DONE').first().json.description, tags: meta.tags, title_alternatives: meta.title_alternatives,\n  clip_id: meta.clip_id, score: meta.score, risk: meta.risk, below_threshold: !!meta.below_threshold,\n  video_file: $('DONE').first().json.video_file, headline: `${meta.headline_kicker} ${meta.headline_text}`, source_url: meta.source_url,\n} }];"
+      }
+    },
+    {
+      "id": "lf34",
+      "name": "BUILD PLAN REQUEST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Long-form plan: cold-open hook + chaptered segments, chosen from the full transcript.\nconst S = $('CONFIG').first().json;\nconst ctx = $input.first().json;\nconst prep = ctx.result;\nif (!prep.sentences?.length) throw new Error('TRANSCRIPT_EMPTY: no sentences');\nconst mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;\nconst lines = prep.sentences.map((s) => `[${s.id}] (${mmss(s.start)} · ${(s.end - s.start).toFixed(1)}s) ${s.text}`).join('\\n');\nconst target = S.target_minutes * 60;\n\nconst MODE = S.mode === 'continuous'\n  ? `MODO: CORTE CONTÍNUO. Escolha UM trecho contínuo (o melhor) com cerca de ${S.target_minutes} minutos\n(entre ${Math.round(target * 0.6)}s e ${Math.round(target * 1.4)}s) e divida-o em 3 a 6 CAPÍTULOS nas mudanças de\nassunto: os segmentos devem ser CONTÍGUOS (o start_id de cada um = end_id do anterior + 1).`\n  : `MODO: MELHORES MOMENTOS. Escolha de 4 a 8 segmentos em ORDEM CRONOLÓGICA, cada um com 20 a 120\nsegundos, somando cerca de ${S.target_minutes} minutos (entre ${Math.round(target * 0.6)}s e ${Math.round(target * 1.4)}s).`;\n\nconst SYSTEM = `Você edita vídeos longos (16:9) do canal independente \"${S.channel_name}\" a partir de um vídeo-fonte.\nPessoa principal: ${S.subject_name} (${S.subject_notes}).\n\n${MODE}\n\nREGRAS\n- Some as durações das frases (\"4.2s\") para respeitar os tempos.\n- Segmentos em que ${S.subject_name} é protagonista (fala ou interage); diálogos e discussões valem.\n- Cada segmento começa no início de uma ideia e termina com a ideia CONCLUÍDA. Não corte no meio.\n- Não altere o sentido do que foi dito; não monte sequências que sugiram algo que não aconteceu.\n- chapter: título do capítulo, até 40 caracteres, factual e chamativo, sem afirmar o que não foi dito.\n- start_trim_text / end_trim_text: palavras de OUTRA pessoa coladas no início/fim da frase, para cortar\n  (copie exatamente); use \"\" quando não houver.\n- HOOK (abertura): um momento de 6 a 20 segundos, o mais forte do vídeo, que funcione sozinho como\n  chamada. Pode ser de dentro de um dos segmentos (vai se repetir depois, é normal).\n- thumbnail_sentence_id: número de UMA frase dita por ${S.subject_name} (não por outra pessoa), no\n  momento mais expressivo, para a thumbnail.\n- Não avalie se concorda politicamente.`;\n\nconst seg = { type: 'object', additionalProperties: false,\n  required: ['start_id', 'end_id', 'start_trim_text', 'end_trim_text', 'chapter', 'why'],\n  properties: { start_id: { type: 'integer' }, end_id: { type: 'integer' }, start_trim_text: { type: 'string' },\n    end_trim_text: { type: 'string' }, chapter: { type: 'string' }, why: { type: 'string' } } };\nconst schema = { type: 'object', additionalProperties: false, required: ['hook', 'segments', 'title_hint', 'summary', 'thumbnail_sentence_id'],\n  properties: { hook: seg, thumbnail_sentence_id: { type: 'integer' }, segments: { type: 'array', items: seg }, title_hint: { type: 'string' }, summary: { type: 'string' } } };\n\nreturn [{ json: { ...ctx, request: { provider: 'auto', system: SYSTEM, schema,\n  prompt: `VÍDEO: \"${prep.title}\" — canal ${prep.channel} (publicado ${prep.upload_date})\\n\\nTRANSCRIÇÃO (frases):\\n${lines}` } } }];"
+      }
+    },
+    {
+      "id": "lf35",
+      "name": "AI PLANNER",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8787/v1/complete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 600000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      }
+    },
+    {
+      "id": "lf36",
+      "name": "VALIDATE PLAN",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Validates the plan and turns it into render parts (hook + segments).\nconst S = $('CONFIG').first().json;\nconst res = $input.first().json;\nconst prep = $('BUILD PLAN REQUEST').first().json.result;\nif (!res?.ok || !Array.isArray(res.json?.segments)) throw new Error(`${res?.error_code ?? 'LLM_INVALID_JSON'}: planner ${res?.error_message ?? 'no segments'}`);\nconst byId = new Map(prep.sentences.map((s) => [s.id, s]));\nconst norm = (t) => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, '').split(/\\s+/).filter(Boolean);\nconst skip = (s, trim, atEnd) => {\n  const t = norm(trim || ''); if (!t.length) return 0;\n  const ws = norm(s.text); const sl = atEnd ? ws.slice(ws.length - t.length) : ws.slice(0, t.length);\n  return t.length < ws.length && sl.join(' ') === t.join(' ') ? t.length : 0;\n};\nconst toPart = (x, role) => {\n  const a = byId.get(x.start_id), b = byId.get(x.end_id);\n  if (!a || !b || x.end_id < x.start_id) return null;\n  const ss = skip(a, x.start_trim_text, false), se = x.end_id === x.start_id && ss ? 0 : skip(b, x.end_trim_text, true);\n  const text = prep.sentences.filter((s) => s.id >= x.start_id && s.id <= x.end_id).map((s) => s.text).join(' ').split(/\\s+/);\n  return { start_id: x.start_id, end_id: x.end_id, role, skip_words_start: ss, skip_words_end: se,\n    chapter: (x.chapter || '').slice(0, 48), why: x.why, duration: b.end - a.start,\n    text: text.slice(ss, text.length - se).join(' ') };\n};\nconst rejected = [];\nlet segments = res.json.segments.map((x) => toPart(x, 'segment')).filter((p, i) => p || !rejected.push({ i, reason: 'invalid ids' }));\nsegments.sort((p, q) => p.start_id - q.start_id);\nsegments = segments.filter((p, i) => {\n  if (p.duration < 12 || p.duration > 420) { rejected.push({ chapter: p.chapter, reason: `duration ${p.duration.toFixed(0)}s` }); return false; }\n  if (i > 0 && p.start_id <= segments[i - 1].end_id) { rejected.push({ chapter: p.chapter, reason: 'overlap' }); return false; }\n  return true;\n});\nconst hook = toPart(res.json.hook, 'hook');\nconst total = segments.reduce((t, p) => t + p.duration, 0) + (hook?.duration || 0);\nconsole.log(JSON.stringify({ segments: segments.length, total_seconds: Math.round(total), rejected }));\nif (segments.length < 2) throw new Error(`NO_CLIPS_RETURNED: planner gave ${segments.length} valid segments`);\nconst parts = [...(hook && hook.duration >= 4 && hook.duration <= 30 ? [hook] : []), ...segments];\nreturn [{ json: {\n  clip_id: `${prep.video_id}_long_${S.mode}`, parts, mode: S.mode, title: res.json.title_hint, summary: res.json.summary,\n  transcript: segments.map((p) => p.text).join('\\n'), context_text: '', question: null,\n  source_url: prep.source_url, source_video_id: prep.video_id, source_title: prep.title, source_channel: prep.channel,\n  duration: Math.round(total),\n  thumbnail_sentence_id: byId.has(res.json.thumbnail_sentence_id) ? res.json.thumbnail_sentence_id : null,\n} }];"
+      }
+    },
+    {
+      "id": "lf37",
+      "name": "BUILD REVIEW REQUEST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Fidelity review of the whole edit (one call). Only meaning-changing problems block a segment.\nconst S = $('CONFIG').first().json;\nconst plan = $input.first().json;\nconst SYSTEM = `Você revisa a montagem de um vídeo longo (${plan.mode === 'continuous' ? 'corte contínuo' : 'melhores momentos'})\ndo canal independente \"${S.channel_name}\" com trechos de ${S.subject_name}.\n\nPara cada segmento decida:\n- block = true SOMENTE se: a montagem muda o sentido do que foi dito; a ordem/abertura leva o espectador a\n  concluir algo que não aconteceu; uma fala fica atribuída à pessoa errada de forma que muda o sentido;\n  ou o trecho é ininteligível.\n- block = false para problemas menores (começa no meio de uma conversa mas dá para entender, palavras\n  truncadas — são erros de transcrição corrigidos à parte —, fala autodeclarada não verificada, tom\n  hostil da própria situação). Registre-os em reason.\n- chapter: reescreva o título do capítulo para ser fiel e atribuído (ex.: \"Pavanato diz que...\"),\n  chamativo, até 40 caracteres. Pode manter o original se estiver bom.\nrisk do conjunto: LOW, MEDIUM ou HIGH. Não avalie se concorda politicamente.`;\nconst schema = { type: 'object', additionalProperties: false, required: ['risk', 'issues', 'segments'],\n  properties: { risk: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] }, issues: { type: 'array', items: { type: 'string' } },\n    segments: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['index', 'block', 'reason', 'chapter'],\n      properties: { index: { type: 'integer' }, block: { type: 'boolean' }, reason: { type: 'string' }, chapter: { type: 'string' } } } } } };\nconst body = plan.parts.map((p, i) => `#${i} [${p.role === 'hook' ? 'ABERTURA' : 'SEGMENTO'}] ${p.chapter && p.role !== 'hook' ? `CAPÍTULO: ${p.chapter}\\n` : ''}${p.text}`).join('\\n\\n');\nreturn [{ json: { ...plan, request: { provider: 'auto', system: SYSTEM, schema,\n  prompt: `Segmentos na ordem em que aparecerão no vídeo:\\n\\n${body}` } } }];"
+      }
+    },
+    {
+      "id": "lf38",
+      "name": "AI REVIEW",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8787/v1/complete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 600000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      }
+    },
+    {
+      "id": "lf39",
+      "name": "CHECK REVIEW",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Drops segments the review flagged; a HIGH-risk edit stops the run (unless pilot fallback).\nconst res = $input.first().json;\nconst { request, ...plan } = $('BUILD REVIEW REQUEST').first().json;\nconst S = $('CONFIG').first().json;\nif (!res?.ok || !res.json) throw new Error(`${res?.error_code ?? 'LLM_INVALID_JSON'}: review ${res?.error_message ?? ''}`);\nconst verdict = new Map((res.json.segments || []).map((s) => [s.index, s]));\nconst dropped = [];\nconst parts = plan.parts.filter((p, i) => {\n  const v = verdict.get(i);\n  if (v && v.block) { dropped.push({ i, chapter: p.chapter, reason: v.reason }); return false; }\n  if (v && v.chapter && p.role === 'segment') p.chapter = v.chapter.slice(0, 48);\n  return true;\n});\nconsole.log(JSON.stringify({ review_risk: res.json.risk, issues: res.json.issues, dropped }));\nif (parts.filter((p) => p.role === 'segment').length < 2) throw new Error('ALL_CLIPS_REJECTED: review left fewer than 2 segments');\nif (res.json.risk === 'HIGH' && !(S.pilot && S.allow_below_threshold)) throw new Error(`ALL_CLIPS_REJECTED: review risk HIGH (${res.json.issues.join('; ')})`);\nreturn [{ json: { ...plan, parts, risk: res.json.risk, review_issues: res.json.issues, dropped,\n  score: null, status: res.json.risk === 'HIGH' ? 'REVIEW' : 'SELECTED', below_threshold: res.json.risk === 'HIGH',\n  main_topic: plan.summary } }];"
+      }
+    },
+    {
+      "id": "lf40",
+      "name": "READ THUMB",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        6380,
+        300
+      ],
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ $('DONE').first().json.thumbnail_file }}",
+        "options": {
+          "dataPropertyName": "thumb"
+        }
+      }
+    },
+    {
+      "id": "lf41",
+      "name": "SET THUMBNAIL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6600,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId={{ $('CHECK UPLOAD').first().json.youtube_output_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "thumb",
+        "options": {}
+      },
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "youtubeOAuth00001",
+          "name": "YouTube (Radar Patriota)"
+        }
+      }
+    },
+    {
+      "id": "lf42",
+      "name": "THUMB ROW",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6820,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst up = $('CHECK UPLOAD').first().json;\nconst ok = !!res?.items?.length || !!res?.kind;\nif (!ok) console.log(`THUMBNAIL_FAILED: ${JSON.stringify(res).slice(0, 300)}`);\nreturn [{ json: { ...up, error_reason: ok ? '' : `THUMBNAIL_FAILED: ${(res?.error?.message || JSON.stringify(res)).slice(0, 200)}` } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "ENSURE TABLE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ENSURE TABLE": {
+      "main": [
+        [
+          {
+            "node": "LOOKUP VIDEO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOOKUP VIDEO": {
+      "main": [
+        [
+          {
+            "node": "IDEMPOTENCY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IDEMPOTENCY": {
+      "main": [
+        [
+          {
+            "node": "MARK PROCESSING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MARK PROCESSING": {
+      "main": [
+        [
+          {
+            "node": "CLIPPER PREPARE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CLIPPER PREPARE": {
+      "main": [
+        [
+          {
+            "node": "CHECK PREPARE SUBMIT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECK PREPARE SUBMIT": {
+      "main": [
+        [
+          {
+            "node": "WAIT PREPARE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WAIT PREPARE": {
+      "main": [
+        [
+          {
+            "node": "PREPARE STATUS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PREPARE STATUS": {
+      "main": [
+        [
+          {
+            "node": "CHECK PREPARE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECK PREPARE": {
+      "main": [
+        [
+          {
+            "node": "Prepared?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepared?": {
+      "main": [
+        [
+          {
+            "node": "BUILD PLAN REQUEST",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "WAIT PREPARE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUILD PLAN REQUEST": {
+      "main": [
+        [
+          {
+            "node": "AI PLANNER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI PLANNER": {
+      "main": [
+        [
+          {
+            "node": "VALIDATE PLAN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VALIDATE PLAN": {
+      "main": [
+        [
+          {
+            "node": "BUILD REVIEW REQUEST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUILD REVIEW REQUEST": {
+      "main": [
+        [
+          {
+            "node": "AI REVIEW",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI REVIEW": {
+      "main": [
+        [
+          {
+            "node": "CHECK REVIEW",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECK REVIEW": {
+      "main": [
+        [
+          {
+            "node": "BUILD PROOFREAD REQUEST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUILD PROOFREAD REQUEST": {
+      "main": [
+        [
+          {
+            "node": "AI PROOFREAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI PROOFREAD": {
+      "main": [
+        [
+          {
+            "node": "APPLY PROOFREAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "APPLY PROOFREAD": {
+      "main": [
+        [
+          {
+            "node": "BUILD METADATA REQUEST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUILD METADATA REQUEST": {
+      "main": [
+        [
+          {
+            "node": "AI METADATA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI METADATA": {
+      "main": [
+        [
+          {
+            "node": "VALIDATE METADATA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VALIDATE METADATA": {
+      "main": [
+        [
+          {
+            "node": "CLIPPER RENDER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CLIPPER RENDER": {
+      "main": [
+        [
+          {
+            "node": "CHECK RENDER SUBMIT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECK RENDER SUBMIT": {
+      "main": [
+        [
+          {
+            "node": "WAIT RENDER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WAIT RENDER": {
+      "main": [
+        [
+          {
+            "node": "RENDER STATUS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RENDER STATUS": {
+      "main": [
+        [
+          {
+            "node": "CHECK RENDER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECK RENDER": {
+      "main": [
+        [
+          {
+            "node": "Rendered?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rendered?": {
+      "main": [
+        [
+          {
+            "node": "DONE",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "WAIT RENDER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DONE": {
+      "main": [
+        [
+          {
+            "node": "SELECTED ROW",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SELECTED ROW": {
+      "main": [
+        [
+          {
+            "node": "MARK SELECTED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MARK SELECTED": {
+      "main": [
+        [
+          {
+            "node": "Upload?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload?": {
+      "main": [
+        [
+          {
+            "node": "READ MP4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "READ MP4": {
+      "main": [
+        [
+          {
+            "node": "YOUTUBE UPLOAD PRIVATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YOUTUBE UPLOAD PRIVATE": {
+      "main": [
+        [
+          {
+            "node": "CHECK UPLOAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECK UPLOAD": {
+      "main": [
+        [
+          {
+            "node": "MARK UPLOADED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MARK UPLOADED": {
+      "main": [
+        [
+          {
+            "node": "READ THUMB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "READ THUMB": {
+      "main": [
+        [
+          {
+            "node": "SET THUMBNAIL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SET THUMBNAIL": {
+      "main": [
+        [
+          {
+            "node": "THUMB ROW",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "THUMB ROW": {
+      "main": [
+        [
+          {
+            "node": "RESULT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}

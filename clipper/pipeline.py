@@ -215,8 +215,10 @@ def transcribe(workdir: Path, prompt: str | None = None) -> dict:
 
 # --- frame io ----------------------------------------------------------------
 
-def read_frames(src: Path, start: float, dur: float, w: int, h: int, fps: float | None = None):
+def read_frames(src: Path, start: float, dur: float, w: int, h: int, fps: float | None = None, fit: bool = False):
     vf = [f'scale={w}:{h}:flags=lanczos']
+    if fit:  # keep aspect ratio, pad (e.g. vertical source in a 16:9 output)
+        vf = [f'scale={w}:{h}:flags=lanczos:force_original_aspect_ratio=decrease', f'pad={w}:{h}:(ow-iw)/2:(oh-ih)/2']
     if fps:
         vf.insert(0, f'fps={fps}')
     cmd = [FFMPEG, '-v', 'error', '-ss', f'{start:.3f}', '-t', f'{dur:.3f}', '-i', str(src),
@@ -287,6 +289,62 @@ def detect_overlay_band(workdir: Path, samples: int = 48) -> list[float] | None:
                         round(min(1, (best[1] + 1) / h + 0.006), 4)]
     cache.write_text(json.dumps({'band': band, 'version': 3}))
     return band
+
+
+def detect_static_marks(workdir: Path, samples: int = 40) -> float | None:
+    """Top edge (fraction of height) of burned-in marks in the lower half, e.g. a creator's @handle.
+
+    Pixels of a watermark keep their value across scenes; we keep small, wide static blobs only
+    (a fully static frame - fixed camera, same shot - is ignored). Cached in overlay.json.
+    """
+    import cv2
+
+    cache = workdir / 'overlay.json'
+    data = json.loads(cache.read_text()) if cache.exists() else {}
+    if 'marks_top' in data:
+        return data['marks_top']
+    src = find(workdir, 'video')
+    meta = probe(src)
+    w, h = 320, int(round(meta['height'] * 320 / meta['width'] / 2) * 2)
+    grays = []
+    for i in range(samples):
+        f = grab_frame(src, meta['duration'] * (0.05 + 0.9 * i / (samples - 1)), w, h)
+        if f is not None:
+            grays.append(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY).astype(np.float32))
+    top = None
+    if len(grays) >= samples // 2:
+        std = np.stack(grays).std(axis=0)
+        mask = (std < 6).astype(np.uint8)
+        band = data.get('band')
+        if band:
+            mask[int(band[0] * h):] = 0
+        mask[: h // 2] = 0
+        if mask.mean() < 0.15:  # otherwise the camera itself is static: nothing to learn
+            mask = cv2.dilate(mask, np.ones((3, 9), np.uint8))
+            n, _, stats, _ = cv2.connectedComponentsWithStats(mask)
+            tops = [stats[i, cv2.CC_STAT_TOP] / h for i in range(1, n)
+                    if 0.0004 < stats[i, cv2.CC_STAT_AREA] / (w * h) < 0.04
+                    and stats[i, cv2.CC_STAT_WIDTH] > 2 * stats[i, cv2.CC_STAT_HEIGHT]]
+            top = round(min(tops) - 0.01, 4) if tops else None
+    data['marks_top'] = top
+    cache.write_text(json.dumps(data))
+    return top
+
+
+def speaking_face(src: Path, t: float, width: int, height: int, window: float = 3.0):
+    """(time, Face) of the person talking around t (largest jawOpen variation), or None."""
+    frames = analyze(src, max(0.0, t - window / 2), window, width, height)
+    tracks: dict[int, list] = {}
+    for f in frames:
+        for face in f['faces']:
+            key = int(face.cx * 10)  # coarse x bucket = same person within a short window
+            tracks.setdefault(key, []).append((f['t'], face))
+    if not tracks:
+        return None
+    best = max(tracks.values(), key=lambda tr: (float(np.std([fc.jaw for _, fc in tr])) if len(tr) > 2 else 0)
+               + 0.3 * max(fc.size for _, fc in tr))
+    tt, face = max(best, key=lambda x: x[1].size)
+    return max(0.0, t - window / 2) + tt, face
 
 
 # --- analysis: shots + faces + active speaker -------------------------------
@@ -686,7 +744,7 @@ def cover_crop(img: np.ndarray, w: int, h: int, cx: float = 0.5, cy: float = 0.5
     return cv2.resize(img[y:y + ch, x:x + cw], (w, h), interpolation=cv2.INTER_LANCZOS4)
 
 
-def top_image(src: Path, plan: list[dict], sw: int, sh: int, override: str | None) -> np.ndarray:
+def top_image(src: Path, plan: list[dict], sw: int, sh: int, override: str | None, subject: str = '') -> np.ndarray:
     """Top panel: a user image if given, else the sharpest big-face frame of the answer."""
     import cv2
 
@@ -695,8 +753,12 @@ def top_image(src: Path, plan: list[dict], sw: int, sh: int, override: str | Non
         img = cv2.imread(override)
         if img is not None:
             return sharpen(cover_crop(img, w, h, 0.5, 0.4))
-    best = None
-    for p in plan:
+    import faceid  # local import: faceid imports this module
+
+    found = faceid.best_subject_frame(src, [(p['start'], p['dur']) for p in plan if p.get('role') != 'question'],
+                                      subject, sw, sh)
+    best = (found[0], found[1]) if found else None
+    for p in plan if best is None else []:
         if p.get('role') == 'question':
             continue
         for f in p['frames']:
@@ -813,7 +875,7 @@ def render(workdir: Path, transcript: dict, parts: list[dict], out_path: Path, *
            context_text: str | None = None, cover_band: list[float] | None = None,
            source_label: str = '', sentence_fixes: dict | None = None, brand: str = BRAND_NAME,
            template: str = 'alerta', headline_kicker: str = '', headline_text: str = '',
-           theme: str = 'brasil', top_image_path: str | None = None) -> dict:
+           theme: str = 'brasil', top_image_path: str | None = None, subject: str = '') -> dict:
     """parts: [{start_id, end_id, role: 'question'|'answer', skip_words_start?, skip_words_end?}] in order."""
     src = find(workdir, 'video')
     audio = find(workdir, 'audio')
@@ -887,7 +949,7 @@ def render(workdir: Path, transcript: dict, parts: list[dict], out_path: Path, *
             raise PipelineError('INVALID_PARAMS', 'alerta template needs headline_kicker and headline_text')
         # Static parts of the frame are built once.
         base = np.zeros((OUT_H, OUT_W, 3), np.uint8)
-        base[:ALERTA_IMG_H] = top_image(src, plan, sw, sh, top_image_path)
+        base[:ALERTA_IMG_H] = top_image(src, plan, sw, sh, top_image_path, subject)
         grad = np.linspace(0, 0.55, 220)[:, None, None]  # darken the image bottom for the source tag
         base[ALERTA_IMG_H - 400:ALERTA_IMG_H - 180] = (base[ALERTA_IMG_H - 400:ALERTA_IMG_H - 180] * (1 - grad)).astype(np.uint8)
         base[ALERTA_IMG_H - 180:ALERTA_IMG_H] = (base[ALERTA_IMG_H - 180:ALERTA_IMG_H] * 0.45).astype(np.uint8)
