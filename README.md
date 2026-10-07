@@ -9,7 +9,7 @@ Plano completo: `docs/plan.md` (local, não versionado). Operação: [docs/runbo
 |---|---|
 | M0 — Infra (Docker, n8n, persistência, runbook) | ✅ |
 | LLM bridge (Claude/Codex via assinatura) | ✅ |
-| M1 — Vizard | ⏳ |
+| M1 — Vizard (create, polling, candidatos, transcript, MP4) | ✅ |
 | M2 — Editorial AI | ⏳ |
 | M3 — YouTube | ⏳ |
 | M4 — Pilot Done | ⏳ |

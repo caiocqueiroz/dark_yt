@@ -14,6 +14,21 @@ Se `docker` não estiver no PATH:
 | Backup | `scripts/backup.sh` (volume → `BACKUP_DIR`, workflows → `workflows/`) |
 | Atualizar n8n | trocar a tag em `docker-compose.yml`, `scripts/backup.sh`, `docker compose up -d` |
 
+## Workflows
+
+Fonte de verdade: `workflows/*.json` no repo. Importar/atualizar no n8n:
+```bash
+docker cp workflows/01-pilot.json pavanatto-n8n:/tmp/wf.json
+docker exec pavanatto-n8n n8n import:workflow --input=/tmp/wf.json
+```
+Executar pela CLI (porta do task broker precisa ser outra, a 5679 é do n8n principal):
+```bash
+docker exec -e N8N_RUNNERS_BROKER_PORT=5690 pavanatto-n8n n8n execute --id=pavanattoPilot01 --rawOutput
+```
+`PAVANATTO - 01 - PILOT`: no node CONFIG, `vizard_project_id` reaproveita um projeto Vizard
+já processado (não gasta minutos). Deixe vazio para processar uma URL nova.
+Links de MP4 do Vizard expiram em 7 dias; rodar de novo gera links novos.
+
 ## LLM bridge (Claude / Codex sem API key)
 
 `bridge/server.mjs` expõe os CLIs `claude` e `codex` (logados nas assinaturas Pro) como

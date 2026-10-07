@@ -1,0 +1,340 @@
+{
+  "id": "pavanattoPilot01",
+  "name": "PAVANATTO - 01 - PILOT",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "nodes": [
+    {
+      "id": "a1",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "a2",
+      "name": "CONFIG",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Edit these values for each manual run.\nconst config = {\n  source_url: 'https://www.youtube.com/watch?v=MQHIukVzupE',\n  source_title: 'LUCAS PAVANATO FALA SOBRE SUAS EXPECTATIVAS PARA INÍCIO DO MANDATO COMO DEPUTADO FEDERAL',\n  source_channel: 'Itatiaia',\n  pilot: true,\n  force_reprocess: false,\n  // Set to reuse an existing Vizard project instead of creating (and paying for) a new one.\n  vizard_project_id: '35073699',\n};\n\nconst m = config.source_url.match(/(?:v=|youtu\\.be\\/|shorts\\/|live\\/)([A-Za-z0-9_-]{11})/);\nif (!m) throw new Error('CONFIG_INVALID: could not extract YouTube video id from source_url');\n\nreturn [{ json: { ...config, source_video_id: m[1], started_at: new Date().toISOString() } }];"
+      }
+    },
+    {
+      "id": "a3",
+      "name": "Has Project?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ String($json.vizard_project_id || '') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a4",
+      "name": "VIZARD CREATE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://elb-api.vizard.ai/hvizard-server-front/open-api/v1/project/create",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  lang: 'pt',\n  preferLength: [1, 2],\n  videoUrl: $json.source_url,\n  videoType: 2,\n  ratioOfClip: 1,\n  maxClipNumber: 10,\n  subtitleSwitch: 1,\n  headlineSwitch: 0,\n  highlightSwitch: 1,\n  emojiSwitch: 0,\n  removeSilenceSwitch: 1,\n  autoBrollSwitch: 0,\n  clipModel: 'clip_v2',\n  projectName: 'Pavanatto Pilot ' + $json.source_video_id\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vizardApiKey00001",
+          "name": "Vizard API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "a5",
+      "name": "CHECK CREATE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        400
+      ],
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst config = $('CONFIG').first().json;\n\nconst messages = {\n  4001: 'Invalid API key', 4002: 'Project creation failed', 4003: 'Rate limit exceeded',\n  4004: 'Unsupported video format', 4005: 'Video file is broken', 4006: 'Illegal parameter',\n  4007: 'Insufficient remaining minutes', 4008: 'Cannot download video from URL',\n  4009: 'Invalid video URL', 4010: 'Cannot detect spoken language',\n};\n\nif (res?.code !== 2000 || !res?.projectId) {\n  const detail = messages[res?.code] ?? 'unexpected response';\n  throw new Error(`VIZARD_CREATE_FAILED: code=${res?.code} ${detail} ${res?.errMsg ?? ''}`.trim());\n}\n\nreturn [{ json: { ...config, vizard_project_id: String(res.projectId), vizard_share_link: res.shareLink ?? null } }];"
+      }
+    },
+    {
+      "id": "a6",
+      "name": "WAIT",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        300
+      ],
+      "webhookId": "5b0f6a0e-pavanatto-pilot-wait",
+      "parameters": {
+        "amount": 30
+      }
+    },
+    {
+      "id": "a7",
+      "name": "VIZARD QUERY",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://elb-api.vizard.ai/hvizard-server-front/open-api/v1/project/query/{{ $('WAIT').item.json.vizard_project_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vizardApiKey00001",
+          "name": "Vizard API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "a8",
+      "name": "CHECK STATUS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const MAX_POLLS = 40;\nconst res = $input.first().json;\nconst ctx = $('WAIT').first().json;\nconst poll = $runIndex + 1;\n\nif (res?.code === 1000) {\n  if (poll >= MAX_POLLS) throw new Error(`VIZARD_TIMEOUT: project ${ctx.vizard_project_id} still processing after ${poll} polls`);\n  return [{ json: { ...ctx, vizard_status: 'PROCESSING', polls: poll } }];\n}\nif (res?.code === 2000) {\n  if (!Array.isArray(res.videos)) throw new Error('VIZARD_INVALID_RESPONSE: code 2000 without videos array');\n  return [{ json: { ...ctx, vizard_status: 'COMPLETE', polls: poll, vizard: res } }];\n}\nthrow new Error(`VIZARD_QUERY_FAILED: code=${res?.code} ${res?.errMsg ?? ''}`.trim());"
+      }
+    },
+    {
+      "id": "a9",
+      "name": "Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.vizard_status }}",
+              "rightValue": "COMPLETE",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a10",
+      "name": "NORMALIZE CLIPS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nconst videos = ctx.vizard.videos;\n\nconst parseTopics = (v) => {\n  if (Array.isArray(v)) return v;\n  try { const p = JSON.parse(v ?? '[]'); return Array.isArray(p) ? p : []; } catch { return []; }\n};\n\nconst clips = videos\n  .filter((v) => v && v.videoId && v.videoUrl)\n  .map((v) => ({\n    clip_id: String(v.videoId),\n    video_url: v.videoUrl,\n    duration: Math.round((Number(v.videoMsDuration) || 0) / 1000),\n    title: v.title ?? '',\n    transcript: v.transcript ?? '',\n    viral_score: Number(v.viralScore) || 0,\n    viral_reason: v.viralReason ?? '',\n    related_topic: parseTopics(v.relatedTopic).join(', '),\n    clip_editor_url: v.clipEditorUrl ?? null,\n    source_url: ctx.source_url,\n    source_video_id: ctx.source_video_id,\n    source_title: ctx.source_title,\n    source_channel: ctx.source_channel,\n    vizard_project_id: ctx.vizard_project_id,\n  }));\n\nif (clips.length === 0) throw new Error(`NO_CLIPS_RETURNED: project ${ctx.vizard_project_id} returned ${videos.length} videos, none usable`);\n\nconst withTranscript = clips.filter((c) => c.transcript.trim().length > 0).length;\nconsole.log(`clips=${clips.length} with_transcript=${withTranscript} polls=${ctx.polls}`);\n\nreturn clips.map((c) => ({ json: c }));"
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Has Project?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Project?": {
+      "main": [
+        [
+          {
+            "node": "WAIT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VIZARD CREATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VIZARD CREATE": {
+      "main": [
+        [
+          {
+            "node": "CHECK CREATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECK CREATE": {
+      "main": [
+        [
+          {
+            "node": "WAIT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WAIT": {
+      "main": [
+        [
+          {
+            "node": "VIZARD QUERY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VIZARD QUERY": {
+      "main": [
+        [
+          {
+            "node": "CHECK STATUS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECK STATUS": {
+      "main": [
+        [
+          {
+            "node": "Complete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete?": {
+      "main": [
+        [
+          {
+            "node": "NORMALIZE CLIPS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "WAIT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
