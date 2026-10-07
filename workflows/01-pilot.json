@@ -28,7 +28,7 @@
         300
       ],
       "parameters": {
-        "jsCode": "// Edit these values for each manual run.\nconst config = {\n  source_url: 'https://www.youtube.com/watch?v=MQHIukVzupE',\n  source_title: 'LUCAS PAVANATO FALA SOBRE SUAS EXPECTATIVAS PARA INÍCIO DO MANDATO COMO DEPUTADO FEDERAL',\n  source_channel: 'Itatiaia',\n  pilot: true,\n  force_reprocess: false,\n  // Set to reuse an existing Vizard project instead of creating (and paying for) a new one.\n  vizard_project_id: '35073699',\n};\n\nconst m = config.source_url.match(/(?:v=|youtu\\.be\\/|shorts\\/|live\\/)([A-Za-z0-9_-]{11})/);\nif (!m) throw new Error('CONFIG_INVALID: could not extract YouTube video id from source_url');\n\nreturn [{ json: { ...config, source_video_id: m[1], started_at: new Date().toISOString() } }];"
+        "jsCode": "// Edit these values for each manual run.\nconst config = {\n  source_url: 'https://www.youtube.com/watch?v=MQHIukVzupE',\n  source_title: 'LUCAS PAVANATO FALA SOBRE SUAS EXPECTATIVAS PARA INÍCIO DO MANDATO COMO DEPUTADO FEDERAL',\n  source_channel: 'Itatiaia',\n  pilot: true,\n  force_reprocess: false,\n  // Pilot only: if no clip reaches SCORING_V1, continue with the best non-HIGH clip as REVIEW.\n  allow_below_threshold: true,\n  // Set to reuse an existing Vizard project instead of creating (and paying for) a new one.\n  vizard_project_id: '35073699',\n};\n\nconst m = config.source_url.match(/(?:v=|youtu\\.be\\/|shorts\\/|live\\/)([A-Za-z0-9_-]{11})/);\nif (!m) throw new Error('CONFIG_INVALID: could not extract YouTube video id from source_url');\n\nreturn [{ json: { ...config, source_video_id: m[1], started_at: new Date().toISOString() } }];"
       }
     },
     {
@@ -219,6 +219,85 @@
       "parameters": {
         "jsCode": "const ctx = $input.first().json;\nconst videos = ctx.vizard.videos;\n\nconst parseTopics = (v) => {\n  if (Array.isArray(v)) return v;\n  try { const p = JSON.parse(v ?? '[]'); return Array.isArray(p) ? p : []; } catch { return []; }\n};\n\nconst clips = videos\n  .filter((v) => v && v.videoId && v.videoUrl)\n  .map((v) => ({\n    clip_id: String(v.videoId),\n    video_url: v.videoUrl,\n    duration: Math.round((Number(v.videoMsDuration) || 0) / 1000),\n    title: v.title ?? '',\n    transcript: v.transcript ?? '',\n    viral_score: Number(v.viralScore) || 0,\n    viral_reason: v.viralReason ?? '',\n    related_topic: parseTopics(v.relatedTopic).join(', '),\n    clip_editor_url: v.clipEditorUrl ?? null,\n    source_url: ctx.source_url,\n    source_video_id: ctx.source_video_id,\n    source_title: ctx.source_title,\n    source_channel: ctx.source_channel,\n    vizard_project_id: ctx.vizard_project_id,\n  }));\n\nif (clips.length === 0) throw new Error(`NO_CLIPS_RETURNED: project ${ctx.vizard_project_id} returned ${videos.length} videos, none usable`);\n\nconst withTranscript = clips.filter((c) => c.transcript.trim().length > 0).length;\nconsole.log(`clips=${clips.length} with_transcript=${withTranscript} polls=${ctx.polls}`);\n\nreturn clips.map((c) => ({ json: c }));"
       }
+    },
+    {
+      "id": "a11",
+      "name": "BUILD JUDGE REQUEST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Builds one Editorial Judge request per clip (prompt from docs/plan.md §22).\nconst SYSTEM = `Você é o editor-chefe de um canal independente de vídeos curtos\nsobre declarações públicas de Lucas Pavanatto.\n\nSua tarefa é avaliar candidatos de vídeos produzidos a partir de\nentrevistas, discursos e aparições públicas.\n\nOBJETIVO\n\nSelecionar trechos que tenham alto potencial de retenção em\nYouTube Shorts sem alterar o sentido da fala original.\n\nAvalie:\n\nHOOK — 0 a 25\nOs primeiros segundos despertam curiosidade?\n\nAUTOSSUFICIÊNCIA — 0 a 20\nO vídeo pode ser compreendido sozinho?\n\nCONFLITO/CONTRASTE — 0 a 15\nExiste resposta forte, discordância, contraponto, contraste ou\nafirmação que incentive continuidade?\n\nATUALIDADE — 0 a 15\nO tema possui relevância atual?\n\nCLAREZA — 0 a 10\nA fala é clara?\n\nRETENÇÃO — 0 a 15\nExiste progressão suficiente para incentivar o usuário a chegar ao fim?\n\nPENALIDADES (marque true quando se aplicar)\n\npenalty_meaning_change: o corte pode alterar o sentido original (-20).\npenalty_missing_context: depende fortemente de contexto ausente (-20).\npenalty_slow_start: começa lentamente (-15).\npenalty_repetitive: é repetitivo (-10).\npenalty_title_needs_exaggeration: um título interessante exigiria inventar ou exagerar o conteúdo (-20).\n\nIMPORTANTE\n\nNão avalie se você concorda politicamente com a declaração.\nNão produza propaganda personalizada para grupos ideológicos.\nAvalie interesse editorial, clareza, fidelidade e retenção.\nO TITLE abaixo foi gerado automaticamente pela ferramenta de corte e pode ser\nsensacionalista: avalie a FALA (transcrição), não esse título.\n\nResponda somente com o JSON pedido, em português.`;\n\nconst today = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\nconst schema = {\n  type: 'object',\n  additionalProperties: false,\n  required: ['hook_score','context_score','conflict_score','current_score','clarity_score','retention_score',\n    'penalty_meaning_change','penalty_missing_context','penalty_slow_start','penalty_repetitive',\n    'penalty_title_needs_exaggeration','risk','reason','suggested_hook','main_topic'],\n  properties: {\n    hook_score: { type: 'integer', minimum: 0, maximum: 25 },\n    context_score: { type: 'integer', minimum: 0, maximum: 20 },\n    conflict_score: { type: 'integer', minimum: 0, maximum: 15 },\n    current_score: { type: 'integer', minimum: 0, maximum: 15 },\n    clarity_score: { type: 'integer', minimum: 0, maximum: 10 },\n    retention_score: { type: 'integer', minimum: 0, maximum: 15 },\n    penalty_meaning_change: { type: 'boolean' },\n    penalty_missing_context: { type: 'boolean' },\n    penalty_slow_start: { type: 'boolean' },\n    penalty_repetitive: { type: 'boolean' },\n    penalty_title_needs_exaggeration: { type: 'boolean' },\n    risk: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },\n    reason: { type: 'string' },\n    suggested_hook: { type: 'string' },\n    main_topic: { type: 'string' },\n  },\n};\n\nreturn $input.all().map(({ json: clip }) => ({\n  json: {\n    ...clip,\n    request: {\n      provider: 'auto',\n      system: SYSTEM,\n      schema,\n      prompt: `DATA DE HOJE: ${today}\n\nFONTE: ${clip.source_channel} — \"${clip.source_title}\"\n\nINPUT\n\nTITLE:\n${clip.title}\n\nTRANSCRIPT:\n${clip.transcript}\n\nVIRAL SCORE (0-10, da ferramenta de corte):\n${clip.viral_score}\n\nVIRAL REASON:\n${clip.viral_reason}\n\nDURATION:\n${clip.duration}s`,\n    },\n  },\n}));"
+      }
+    },
+    {
+      "id": "a12",
+      "name": "AI EDITORIAL JUDGE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8787/v1/complete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 0
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 600000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      }
+    },
+    {
+      "id": "a13",
+      "name": "VALIDATE JUDGE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Validates each judge response and computes the final score deterministically.\nconst MAX = { hook_score: 25, context_score: 20, conflict_score: 15, current_score: 15, clarity_score: 10, retention_score: 15 };\nconst PENALTIES = {\n  penalty_meaning_change: 20, penalty_missing_context: 20, penalty_slow_start: 15,\n  penalty_repetitive: 10, penalty_title_needs_exaggeration: 20,\n};\nconst clips = $('BUILD JUDGE REQUEST').all();\n\nreturn $input.all().map((item, i) => {\n  const { request, ...clip } = clips[i].json;\n  const res = item.json;\n  const j = res?.json;\n\n  const problems = [];\n  if (!res?.ok) problems.push(`${res?.error_code ?? 'LLM_FAILED'}: ${res?.error_message ?? 'no response'}`);\n  else if (!j || typeof j !== 'object') problems.push('LLM_INVALID_JSON: missing json');\n  else {\n    for (const [k, max] of Object.entries(MAX)) {\n      if (!Number.isInteger(j[k]) || j[k] < 0 || j[k] > max) problems.push(`LLM_INVALID_JSON: ${k}=${j[k]}`);\n    }\n    for (const k of Object.keys(PENALTIES)) if (typeof j[k] !== 'boolean') problems.push(`LLM_INVALID_JSON: ${k}`);\n    if (!['LOW', 'MEDIUM', 'HIGH'].includes(j.risk)) problems.push(`LLM_INVALID_JSON: risk=${j.risk}`);\n  }\n\n  if (problems.length) {\n    return { json: { ...clip, judge_ok: false, judge_error: problems.join('; '), score: null, risk: null } };\n  }\n\n  const base = Object.keys(MAX).reduce((s, k) => s + j[k], 0);\n  const penalty = Object.entries(PENALTIES).reduce((s, [k, v]) => s + (j[k] ? v : 0), 0);\n  return {\n    json: {\n      ...clip,\n      judge_ok: true,\n      judge_provider: res.provider,\n      judge_model: res.model,\n      score_base: base,\n      score_penalty: penalty,\n      score: Math.max(0, base - penalty),\n      ...j,\n    },\n  };\n});"
+      }
+    },
+    {
+      "id": "a14",
+      "name": "RANK & SELECT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// SCORING_V1 (docs/plan.md §23): score >= 75 AND risk != HIGH, score DESC, LIMIT 1.\nconst MIN_SCORE = 75;\nconst all = $input.all().map((i) => i.json);\nconst judged = all.filter((c) => c.judge_ok);\n\nif (judged.length === 0) {\n  throw new Error(`LLM_INVALID_JSON: no clip could be judged (${all.map((c) => c.judge_error).join(' | ')})`);\n}\n\nconst ranked = [...judged].sort((a, b) => b.score - a.score || b.viral_score - a.viral_score);\nconst eligible = ranked.filter((c) => c.score >= MIN_SCORE && c.risk !== 'HIGH');\n\nconst summary = ranked.map((c) => ({\n  clip_id: c.clip_id, score: c.score, risk: c.risk, eligible: eligible.includes(c), title: c.title,\n}));\nconsole.log(JSON.stringify({ judged: judged.length, failed: all.length - judged.length, ranking: summary }));\n\nif (eligible.length === 0) {\n  const config = $('CONFIG').first().json;\n  const fallback = ranked.find((c) => c.risk !== 'HIGH');\n  if (config.pilot && config.allow_below_threshold && fallback) {\n    return [{ json: { ...fallback, status: 'REVIEW', below_threshold: true, scoring_version: 'SCORING_V1', ranking: summary } }];\n  }\n  throw new Error(`ALL_CLIPS_REJECTED: best score ${ranked[0].score} (${ranked[0].risk}), threshold ${MIN_SCORE}`);\n}\n\nreturn [{ json: { ...eligible[0], status: 'SELECTED', below_threshold: false, scoring_version: 'SCORING_V1', ranking: summary } }];"
+      }
     }
   ],
   "connections": {
@@ -329,6 +408,50 @@
         [
           {
             "node": "WAIT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NORMALIZE CLIPS": {
+      "main": [
+        [
+          {
+            "node": "BUILD JUDGE REQUEST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUILD JUDGE REQUEST": {
+      "main": [
+        [
+          {
+            "node": "AI EDITORIAL JUDGE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI EDITORIAL JUDGE": {
+      "main": [
+        [
+          {
+            "node": "VALIDATE JUDGE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VALIDATE JUDGE": {
+      "main": [
+        [
+          {
+            "node": "RANK & SELECT",
             "type": "main",
             "index": 0
           }
