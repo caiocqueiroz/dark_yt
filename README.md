@@ -12,8 +12,16 @@ Plano completo: `docs/plan.md` (local, não versionado). Operação: [docs/runbo
 | M1 — Vizard (create, polling, candidatos, transcript, MP4) | ✅ |
 | M2 — Editorial AI (judge, validação, ranking) | ✅ |
 | M2.5 — Clipper local (substitui Vizard, ver docs/decisions.md) | ✅ |
-| M3 — YouTube | ⏳ |
-| M4 — Pilot Done | ⏳ |
+| M3 — YouTube (OAuth, metadata, upload PRIVATE) | ✅ |
+| M4 — Pilot Done (e2e Folha → youtu.be PRIVATE, idempotência, erros) | ✅ |
+| M5 — Discovery | ⏳ |
+
+## Rodar
+
+```bash
+scripts/run-pilot.sh 'https://www.youtube.com/watch?v=XXXX' [--force]
+scripts/show-execution.py last ['NODE' ...]
+```
 
 ## Setup
 
