@@ -72,6 +72,14 @@ capítulos → upload PRIVATE + thumbnail (1280×720). Linha na tabela: `<id>:lo
 (2–3 fotos nítidas, de frente). Usadas para a thumbnail e a foto do topo dos Shorts mostrarem a pessoa
 certa. Sem fotos, cai no "rosto que está falando".
 
+## Acessar os vídeos de outro aparelho
+
+1. **Navegador (Tailscale):** `http://<TAILSCALE_IP>:8090` — usuário `radar`, senha `FILES_PASSWORD` do
+   `.env`. Somente leitura, assiste/baixa (suporta avanço no player). Só escuta no IP do Tailscale.
+   Serviço launchd `com.pavanatto.files` (`scripts/install-files-server.sh`, log `logs/files-server.log`).
+2. **Finder (SMB):** Ajustes → Geral → Compartilhamento → Compartilhamento de Arquivos, pasta
+   `/Volumes/MacNVMe/pavanatto-cuts/downloads`; no MacBook: Finder → Cmd+K → `smb://<TAILSCALE_IP>`.
+
 ## LLM bridge (Claude / Codex sem API key)
 
 `bridge/server.mjs` expõe os CLIs `claude` e `codex` (logados nas assinaturas Pro) como
