@@ -90,7 +90,8 @@ def do_prepare(params: dict) -> dict:
     info = pipeline.download_audio(url, workdir)
     video = pipeline.Background(pipeline.download_video, url, workdir)  # downloads while we transcribe
     video.start()
-    tr = pipeline.transcribe(workdir, prompt=f"{info.get('title') or ''}. Lucas Pavanato.")
+    subject = str(params.get('subject') or '')[:80]
+    tr = pipeline.transcribe(workdir, prompt=f"{info.get('title') or ''}. {subject}".strip())
     video.join()
     if video.error:
         raise video.error
@@ -134,8 +135,27 @@ def do_render(params: dict) -> dict:
                           cover_band=cover,
                           source_label=str(params.get('source_label') or '')[:40],
                           sentence_fixes={str(k): str(v)[:1000] for k, v in (params.get('sentence_fixes') or {}).items()
-                                          if str(k).isdigit() and int(k) < n})
+                                          if str(k).isdigit() and int(k) < n},
+                          brand=str(params.get('brand_name') or pipeline.BRAND_NAME)[:40],
+                          template=str(params.get('template') or 'alerta'),
+                          headline_kicker=str(params.get('headline_kicker') or '')[:20],
+                          headline_text=str(params.get('headline_text') or '')[:60],
+                          theme=str(params.get('theme') or 'brasil'),
+                          top_image_path=safe_asset(params.get('top_image')))
     return {**res, 'file_name': name, 'container_path': f'/files/{name}'}
+
+
+ASSETS_DIR = Path(cfg('CLIPPER_ASSETS_DIR', '/Volumes/MacNVMe/pavanatto-cuts/assets'))
+
+
+def safe_asset(name) -> str | None:
+    """Only files inside ASSETS_DIR may be used as images (no arbitrary path reads)."""
+    if not name:
+        return None
+    p = (ASSETS_DIR / str(name)).resolve()
+    if ASSETS_DIR.resolve() not in p.parents or not p.is_file():
+        raise pipeline.PipelineError('INVALID_PARAMS', f'top_image not found in assets: {name}')
+    return str(p)
 
 
 HANDLERS = {'prepare': do_prepare, 'render': do_render}

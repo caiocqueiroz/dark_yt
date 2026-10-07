@@ -24,11 +24,13 @@ docker exec pavanatto-n8n n8n import:workflow --input=/tmp/wf.json
 Rodar o piloto (webhook autenticado no n8n principal; `n8n execute` pela CLI NÃO carrega o
 módulo de Data Tables):
 ```bash
-scripts/run-pilot.sh 'https://www.youtube.com/watch?v=XXXX'          # respeita idempotência
-scripts/run-pilot.sh 'https://www.youtube.com/watch?v=XXXX' --force  # reprocessa
+scripts/run-pilot.sh 'https://www.youtube.com/watch?v=XXXX' --subject 'Nome Sobrenome' [--notes '...']
+scripts/run-pilot.sh '...' --force       # reprocessa vídeo já processado
+scripts/run-pilot.sh '...' --no-upload   # teste: renderiza + metadados, não envia (linha <id>:dryrun)
 scripts/show-execution.py last                                       # acompanhar
 ```
-Depois de importar workflow: `n8n update:workflow --id=pavanattoPilot01 --active=true` + restart.
+Depois de editar `workflows/*.json`: `scripts/deploy-workflows.sh` (n8n 2.x executa a versão PUBLICADA;
+`import:workflow` sozinho só atualiza o rascunho).
 
 Persistência (Data Tables): `processed_videos` (status por vídeo: PROCESSING → SELECTED →
 UPLOADED | ERROR com `error_reason`) e `execution_errors` (gravada pelo `PAVANATO - 99 - ERRORS`).

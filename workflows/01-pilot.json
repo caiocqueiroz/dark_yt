@@ -1,6 +1,6 @@
 {
   "id": "pavanattoPilot01",
-  "name": "PAVANATO - 01 - PILOT",
+  "name": "RADAR PATRIOTA - 01 - PILOT",
   "active": true,
   "settings": {
     "executionOrder": "v1",
@@ -29,7 +29,7 @@
         300
       ],
       "parameters": {
-        "jsCode": "// Edit these values for each manual run.\nconst config = {\n  source_url: 'https://www.youtube.com/watch?v=Sn3H5UzsDoY',\n  pilot: true,\n  force_reprocess: false,\n  // Pilot only: if no clip reaches SCORING_V1, continue with the best non-HIGH clip as REVIEW.\n  allow_below_threshold: true,\n  max_candidates: 10,\n};\n\n// Webhook runs (scripts/run-pilot.sh) override the defaults above.\nlet body = {};\ntry { body = $('Webhook').first().json.body || {}; } catch { /* manual run */ }\nif (body.source_url) config.source_url = String(body.source_url);\nif (body.force_reprocess !== undefined) config.force_reprocess = body.force_reprocess === true || body.force_reprocess === 'true';\nif (body.allow_below_threshold !== undefined) config.allow_below_threshold = body.allow_below_threshold === true || body.allow_below_threshold === 'true';\n\nconst m = config.source_url.match(/(?:v=|youtu\\.be\\/|shorts\\/|live\\/)([A-Za-z0-9_-]{11})/);\nif (!m) throw new Error('CONFIG_INVALID: could not extract YouTube video id from source_url');\n\nreturn [{ json: { ...config, source_video_id: m[1], started_at: new Date().toISOString() } }];"
+        "jsCode": "// Edit these values for each manual run.\nconst config = {\n  source_url: 'https://www.youtube.com/watch?v=Sn3H5UzsDoY',\n  pilot: true,\n  force_reprocess: false,\n  // Pilot only: if no clip reaches SCORING_V1, continue with the best non-HIGH clip as REVIEW.\n  allow_below_threshold: true,\n  max_candidates: 10,\n  upload: true, // false = stop after render + metadata (testing)\n  // Channel and the person this run is about (override per run via webhook body).\n  channel_name: 'Radar Patriota',\n  template: 'alerta', // 'alerta' (image + headline bars + clip) | 'classic' (full-screen clip)\n  subject_name: 'Lucas Pavanato',\n  subject_notes: 'Grafia correta: Pavanato (um T). Deputado federal eleito por São Paulo (PL), ex-vereador.',\n  subject_misspellings: ['Pavanatto'],\n};\n\n// Webhook runs (scripts/run-pilot.sh) override the defaults above.\nlet body = {};\ntry { body = $('Webhook').first().json.body || {}; } catch { /* manual run */ }\nif (body.source_url) config.source_url = String(body.source_url);\nif (body.force_reprocess !== undefined) config.force_reprocess = body.force_reprocess === true || body.force_reprocess === 'true';\nfor (const k of ['subject_name', 'subject_notes', 'channel_name', 'template']) if (body[k]) config[k] = String(body[k]);\nif (Array.isArray(body.subject_misspellings)) config.subject_misspellings = body.subject_misspellings.map(String);\nif (body.upload !== undefined) config.upload = body.upload === true || body.upload === 'true';\nif (body.allow_below_threshold !== undefined) config.allow_below_threshold = body.allow_below_threshold === true || body.allow_below_threshold === 'true';\n\nconst m = config.source_url.match(/(?:v=|youtu\\.be\\/|shorts\\/|live\\/)([A-Za-z0-9_-]{11})/);\nif (!m) throw new Error('CONFIG_INVALID: could not extract YouTube video id from source_url');\n\nreturn [{ json: { ...config, source_video_id: m[1], started_at: new Date().toISOString() } }];"
       }
     },
     {
@@ -57,7 +57,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ source_url: $json.source_url }) }}"
+        "jsonBody": "={{ JSON.stringify({ source_url: $('CONFIG').first().json.source_url, subject: $('CONFIG').first().json.subject_name }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {
@@ -185,7 +185,7 @@
         200
       ],
       "parameters": {
-        "jsCode": "// Asks the LLM to propose clip windows (full sentences) directly from the transcript.\nconst ctx = $input.first().json;\nconst prep = ctx.result;\nconst config = $('CONFIG').first().json;\nif (!prep.sentences?.length) throw new Error('TRANSCRIPT_EMPTY: no sentences');\n\nconst mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;\nconst lines = prep.sentences.map((s) => `[${s.id}] (${mmss(s.start)} · ${(s.end - s.start).toFixed(1)}s) ${s.text}`).join('\\n');\n\nconst SYSTEM = `Você é editor de um canal independente de YouTube Shorts com declarações públicas\nde Lucas Pavanato. Você recebe a transcrição completa de um vídeo, dividida em FRASES numeradas.\n\nTAREFA\nProponha até ${config.max_candidates} trechos candidatos a Shorts.\n\nREGRAS DO TRECHO (resposta)\n- Somente trechos em que LUCAS PAVANATO é quem fala (identifique pelo contexto: apresentação\n  do entrevistador, perguntas dirigidas a ele, referências à própria trajetória). Se houver\n  outros entrevistados, NÃO selecione falas deles como conteúdo principal.\n- start_id/end_id = números das frases [n] (inclusive). Cada linha mostra a duração da frase\n  (ex.: \"4.2s\"): SOME as durações e mantenha o total entre 20 e 60 segundos. Se a resposta\n  inteira for mais longa, escolha o MELHOR sub-trecho autossuficiente dela.\n- COMEÇO: na primeira frase da ideia, idealmente já no ponto mais forte. Evite começar com\n  \"então\", \"e aí\", \"como eu falei\", ou com resposta que dependa de algo não incluído.\n- FIM: a ideia precisa estar CONCLUÍDA. end_id deve ser a frase que fecha o raciocínio; nunca\n  termine no meio de uma enumeração, argumento ou frase interrompida.\n- Deve ser compreensível sozinho e NÃO pode alterar o sentido da fala.\n- Prefira: resposta forte, contraste, conflito real, dado concreto, posição clara, tema atual.\n- Não avalie se concorda politicamente. Não selecione com base em ideologia.\n- Trechos não podem se sobrepor.\n- A transcrição automática às vezes junta falas de pessoas diferentes numa mesma frase. Se a\n  frase start_id começa com palavras de OUTRA pessoa (ex.: o mediador anunciando a réplica),\n  copie essas palavras iniciais EXATAMENTE em start_trim_text; o corte começará depois delas.\n  Idem para end_trim_text: palavras finais da frase end_id que são de outra pessoa ou que\n  começam um raciocínio que não termina. Use \"\" quando não houver.\n\nCONTEXTO (para o espectador saber o que ele está respondendo)\n- Se a resposta é a uma PERGUNTA de um entrevistador (ou provocação de outro participante)\n  que aparece logo antes e dura até ~15 segundos, informe question_start_id/question_end_id\n  com as frases EXATAS da pergunta. Senão use -1 nos dois.\n- context_text: SEMPRE preencha. Uma frase factual (máx. 90 caracteres) dizendo o que está\n  sendo respondido/discutido, sem opinião, sem adjetivos, sem atribuir nada que não foi dito.\n  Ex.: \"Folha pergunta sobre críticas que ele já fez a Bolsonaro\".\n\nspeaker_confidence: 0–100, certeza de que a RESPOSTA é de Lucas Pavanato.\nscore: 0–10, potencial de retenção.`;\n\nconst schema = {\n  type: 'object', additionalProperties: false, required: ['candidates'],\n  properties: {\n    candidates: {\n      type: 'array',\n      items: {\n        type: 'object', additionalProperties: false,\n        required: ['start_id', 'end_id', 'start_trim_text', 'end_trim_text', 'question_start_id', 'question_end_id', 'context_text',\n          'speaker_confidence', 'score', 'title_hint', 'why'],\n        properties: {\n          start_id: { type: 'integer' }, end_id: { type: 'integer' },\n          start_trim_text: { type: 'string' }, end_trim_text: { type: 'string' },\n          question_start_id: { type: 'integer' }, question_end_id: { type: 'integer' },\n          context_text: { type: 'string' },\n          speaker_confidence: { type: 'integer', minimum: 0, maximum: 100 },\n          score: { type: 'number', minimum: 0, maximum: 10 },\n          title_hint: { type: 'string' }, why: { type: 'string' },\n        },\n      },\n    },\n  },\n};\n\nreturn [{ json: { ...ctx, request: { provider: 'auto', system: SYSTEM, schema,\n  prompt: `VÍDEO: \"${prep.title}\" — canal ${prep.channel} (publicado ${prep.upload_date})\\n\\nTRANSCRIÇÃO (frases):\\n${lines}` } } }];"
+        "jsCode": "const S = $('CONFIG').first().json; // channel_name, subject_name, subject_notes\n// Asks the LLM to propose clip windows (full sentences) directly from the transcript.\nconst ctx = $input.first().json;\nconst prep = ctx.result;\nconst config = $('CONFIG').first().json;\nif (!prep.sentences?.length) throw new Error('TRANSCRIPT_EMPTY: no sentences');\n\nconst mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;\nconst lines = prep.sentences.map((s) => `[${s.id}] (${mmss(s.start)} · ${(s.end - s.start).toFixed(1)}s) ${s.text}`).join('\\n');\n\nconst SYSTEM = `Você é editor do canal independente de YouTube Shorts \"${S.channel_name}\", que publica\ntrechos de declarações públicas. Este vídeo é sobre ${S.subject_name} (${S.subject_notes}). Você recebe a transcrição completa de um vídeo, dividida em FRASES numeradas.\n\nTAREFA\nProponha até ${config.max_candidates} trechos candidatos a Shorts.\n\nREGRAS DO TRECHO (resposta)\n- Somente trechos em que ${S.subject_name.toUpperCase()} é quem fala (identifique pelo contexto: apresentação\n  do entrevistador, perguntas dirigidas a ele, referências à própria trajetória). Se houver\n  outros entrevistados, NÃO selecione falas deles como conteúdo principal.\n- start_id/end_id = números das frases [n] (inclusive). Cada linha mostra a duração da frase\n  (ex.: \"4.2s\"): SOME as durações e mantenha o total entre 20 e 60 segundos. Se a resposta\n  inteira for mais longa, escolha o MELHOR sub-trecho autossuficiente dela.\n- COMEÇO: na primeira frase da ideia, idealmente já no ponto mais forte. Evite começar com\n  \"então\", \"e aí\", \"como eu falei\", ou com resposta que dependa de algo não incluído.\n- FIM: a ideia precisa estar CONCLUÍDA. end_id deve ser a frase que fecha o raciocínio; nunca\n  termine no meio de uma enumeração, argumento ou frase interrompida.\n- Deve ser compreensível sozinho e NÃO pode alterar o sentido da fala.\n- Prefira: resposta forte, contraste, conflito real, dado concreto, posição clara, tema atual.\n- Não avalie se concorda politicamente. Não selecione com base em ideologia.\n- Trechos não podem se sobrepor.\n- A transcrição automática às vezes junta falas de pessoas diferentes numa mesma frase. Se a\n  frase start_id começa com palavras de OUTRA pessoa (ex.: o mediador anunciando a réplica),\n  copie essas palavras iniciais EXATAMENTE em start_trim_text; o corte começará depois delas.\n  Idem para end_trim_text: palavras finais da frase end_id que são de outra pessoa ou que\n  começam um raciocínio que não termina. Use \"\" quando não houver.\n\nCONTEXTO (para o espectador saber o que ele está respondendo)\n- Se a resposta é a uma PERGUNTA de um entrevistador (ou provocação de outro participante)\n  que aparece logo antes e dura até ~15 segundos, informe question_start_id/question_end_id\n  com as frases EXATAS da pergunta. Senão use -1 nos dois.\n- context_text: SEMPRE preencha. Uma frase factual (máx. 90 caracteres) dizendo o que está\n  sendo respondido/discutido, sem opinião, sem adjetivos, sem atribuir nada que não foi dito.\n  Ex.: \"Folha pergunta sobre críticas que ele já fez a Bolsonaro\".\n\nspeaker_confidence: 0–100, certeza de que a RESPOSTA é de ${S.subject_name}.\nscore: 0–10, potencial de retenção.`;\n\nconst schema = {\n  type: 'object', additionalProperties: false, required: ['candidates'],\n  properties: {\n    candidates: {\n      type: 'array',\n      items: {\n        type: 'object', additionalProperties: false,\n        required: ['start_id', 'end_id', 'start_trim_text', 'end_trim_text', 'question_start_id', 'question_end_id', 'context_text',\n          'speaker_confidence', 'score', 'title_hint', 'why'],\n        properties: {\n          start_id: { type: 'integer' }, end_id: { type: 'integer' },\n          start_trim_text: { type: 'string' }, end_trim_text: { type: 'string' },\n          question_start_id: { type: 'integer' }, question_end_id: { type: 'integer' },\n          context_text: { type: 'string' },\n          speaker_confidence: { type: 'integer', minimum: 0, maximum: 100 },\n          score: { type: 'number', minimum: 0, maximum: 10 },\n          title_hint: { type: 'string' }, why: { type: 'string' },\n        },\n      },\n    },\n  },\n};\n\nreturn [{ json: { ...ctx, request: { provider: 'auto', system: SYSTEM, schema,\n  prompt: `VÍDEO: \"${prep.title}\" — canal ${prep.channel} (publicado ${prep.upload_date})\\n\\nTRANSCRIÇÃO (frases):\\n${lines}` } } }];"
       }
     },
     {
@@ -248,7 +248,7 @@
         200
       ],
       "parameters": {
-        "jsCode": "// Builds one Editorial Judge request per clip (prompt from docs/plan.md §22).\nconst SYSTEM = `Você é o editor-chefe de um canal independente de vídeos curtos\nsobre declarações públicas de Lucas Pavanato.\n\nSua tarefa é avaliar candidatos de vídeos produzidos a partir de\nentrevistas, discursos e aparições públicas.\n\nOBJETIVO\n\nSelecionar trechos que tenham alto potencial de retenção em\nYouTube Shorts sem alterar o sentido da fala original.\n\nAvalie:\n\nHOOK — 0 a 25\nOs primeiros segundos despertam curiosidade?\n\nAUTOSSUFICIÊNCIA — 0 a 20\nO vídeo pode ser compreendido sozinho?\n\nCONFLITO/CONTRASTE — 0 a 15\nExiste resposta forte, discordância, contraponto, contraste ou\nafirmação que incentive continuidade?\n\nATUALIDADE — 0 a 15\nO tema possui relevância atual?\n\nCLAREZA — 0 a 10\nA fala é clara?\n\nRETENÇÃO — 0 a 15\nExiste progressão suficiente para incentivar o usuário a chegar ao fim?\n\nPENALIDADES (marque true quando se aplicar)\n\npenalty_meaning_change: o corte pode alterar o sentido original (-20).\npenalty_missing_context: depende fortemente de contexto ausente (-20).\npenalty_slow_start: começa lentamente (-15).\npenalty_repetitive: é repetitivo (-10).\npenalty_title_needs_exaggeration: um título interessante exigiria inventar ou exagerar o conteúdo (-20).\npenalty_abrupt_end: termina no meio de uma frase ou antes de concluir a ideia (-15).\npenalty_unfaithful_context: o CONTEXTO EXIBIDO ou a PERGUNTA não correspondem ao que é respondido (-20).\n\nIMPORTANTE\n\nNão avalie se você concorda politicamente com a declaração.\nNão produza propaganda personalizada para grupos ideológicos.\nAvalie interesse editorial, clareza, fidelidade e retenção.\nO TITLE abaixo é só uma sugestão interna: avalie a FALA (transcrição), não esse título.\nSe houver PERGUNTA INCLUÍDA, ela aparece antes da resposta no vídeo e conta para autossuficiência.\n\nResponda somente com o JSON pedido, em português.`;\n\nconst today = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\nconst schema = {\n  type: 'object',\n  additionalProperties: false,\n  required: ['hook_score','context_score','conflict_score','current_score','clarity_score','retention_score',\n    'penalty_meaning_change','penalty_missing_context','penalty_slow_start','penalty_repetitive',\n    'penalty_title_needs_exaggeration','penalty_abrupt_end','penalty_unfaithful_context','risk','reason','suggested_hook','main_topic'],\n  properties: {\n    hook_score: { type: 'integer', minimum: 0, maximum: 25 },\n    context_score: { type: 'integer', minimum: 0, maximum: 20 },\n    conflict_score: { type: 'integer', minimum: 0, maximum: 15 },\n    current_score: { type: 'integer', minimum: 0, maximum: 15 },\n    clarity_score: { type: 'integer', minimum: 0, maximum: 10 },\n    retention_score: { type: 'integer', minimum: 0, maximum: 15 },\n    penalty_meaning_change: { type: 'boolean' },\n    penalty_missing_context: { type: 'boolean' },\n    penalty_slow_start: { type: 'boolean' },\n    penalty_repetitive: { type: 'boolean' },\n    penalty_title_needs_exaggeration: { type: 'boolean' },\n    penalty_abrupt_end: { type: 'boolean' },\n    penalty_unfaithful_context: { type: 'boolean' },\n    risk: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },\n    reason: { type: 'string' },\n    suggested_hook: { type: 'string' },\n    main_topic: { type: 'string' },\n  },\n};\n\nreturn $input.all().map(({ json: clip }) => ({\n  json: {\n    ...clip,\n    request: {\n      provider: 'auto',\n      system: SYSTEM,\n      schema,\n      prompt: `DATA DE HOJE: ${today}\n\nFONTE: ${clip.source_channel} — \"${clip.source_title}\"\n\nINPUT\n\nTITLE:\n${clip.title}\n\nCONTEXTO EXIBIDO NA TELA:\n${clip.context_text || '(nenhum)'}\n\nPERGUNTA INCLUÍDA NO VÍDEO:\n${clip.question || '(nenhuma)'}\n\nTRANSCRIPT (resposta):\n${clip.transcript}\n\nSCORE DO SELECIONADOR (0-10):\n${clip.viral_score}\n\nVIRAL REASON:\n${clip.viral_reason}\n\nDURATION:\n${clip.duration}s`,\n    },\n  },\n}));"
+        "jsCode": "const S = $('CONFIG').first().json; // channel_name, subject_name, subject_notes\n// Builds one Editorial Judge request per clip (prompt from docs/plan.md §22).\nconst SYSTEM = `Você é o editor-chefe do canal independente de vídeos curtos \"${S.channel_name}\",\nque publica declarações públicas. Este trecho é de ${S.subject_name}.\n\nSua tarefa é avaliar candidatos de vídeos produzidos a partir de\nentrevistas, discursos e aparições públicas.\n\nOBJETIVO\n\nSelecionar trechos que tenham alto potencial de retenção em\nYouTube Shorts sem alterar o sentido da fala original.\n\nAvalie:\n\nHOOK — 0 a 25\nOs primeiros segundos despertam curiosidade?\n\nAUTOSSUFICIÊNCIA — 0 a 20\nO vídeo pode ser compreendido sozinho?\n\nCONFLITO/CONTRASTE — 0 a 15\nExiste resposta forte, discordância, contraponto, contraste ou\nafirmação que incentive continuidade?\n\nATUALIDADE — 0 a 15\nO tema possui relevância atual?\n\nCLAREZA — 0 a 10\nA fala é clara?\n\nRETENÇÃO — 0 a 15\nExiste progressão suficiente para incentivar o usuário a chegar ao fim?\n\nPENALIDADES (marque true quando se aplicar)\n\npenalty_meaning_change: o corte pode alterar o sentido original (-20).\npenalty_missing_context: depende fortemente de contexto ausente (-20).\npenalty_slow_start: começa lentamente (-15).\npenalty_repetitive: é repetitivo (-10).\npenalty_title_needs_exaggeration: um título interessante exigiria inventar ou exagerar o conteúdo (-20).\npenalty_abrupt_end: termina no meio de uma frase ou antes de concluir a ideia (-15).\npenalty_unfaithful_context: o CONTEXTO EXIBIDO ou a PERGUNTA não correspondem ao que é respondido (-20).\n\nIMPORTANTE\n\nNão avalie se você concorda politicamente com a declaração.\nNão produza propaganda personalizada para grupos ideológicos.\nAvalie interesse editorial, clareza, fidelidade e retenção.\nO TITLE abaixo é só uma sugestão interna: avalie a FALA (transcrição), não esse título.\nSe houver PERGUNTA INCLUÍDA, ela aparece antes da resposta no vídeo e conta para autossuficiência.\n\nResponda somente com o JSON pedido, em português.`;\n\nconst today = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\nconst schema = {\n  type: 'object',\n  additionalProperties: false,\n  required: ['hook_score','context_score','conflict_score','current_score','clarity_score','retention_score',\n    'penalty_meaning_change','penalty_missing_context','penalty_slow_start','penalty_repetitive',\n    'penalty_title_needs_exaggeration','penalty_abrupt_end','penalty_unfaithful_context','risk','reason','suggested_hook','main_topic'],\n  properties: {\n    hook_score: { type: 'integer', minimum: 0, maximum: 25 },\n    context_score: { type: 'integer', minimum: 0, maximum: 20 },\n    conflict_score: { type: 'integer', minimum: 0, maximum: 15 },\n    current_score: { type: 'integer', minimum: 0, maximum: 15 },\n    clarity_score: { type: 'integer', minimum: 0, maximum: 10 },\n    retention_score: { type: 'integer', minimum: 0, maximum: 15 },\n    penalty_meaning_change: { type: 'boolean' },\n    penalty_missing_context: { type: 'boolean' },\n    penalty_slow_start: { type: 'boolean' },\n    penalty_repetitive: { type: 'boolean' },\n    penalty_title_needs_exaggeration: { type: 'boolean' },\n    penalty_abrupt_end: { type: 'boolean' },\n    penalty_unfaithful_context: { type: 'boolean' },\n    risk: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },\n    reason: { type: 'string' },\n    suggested_hook: { type: 'string' },\n    main_topic: { type: 'string' },\n  },\n};\n\nreturn $input.all().map(({ json: clip }) => ({\n  json: {\n    ...clip,\n    request: {\n      provider: 'auto',\n      system: SYSTEM,\n      schema,\n      prompt: `DATA DE HOJE: ${today}\n\nFONTE: ${clip.source_channel} — \"${clip.source_title}\"\n\nINPUT\n\nTITLE:\n${clip.title}\n\nCONTEXTO EXIBIDO NA TELA:\n${clip.context_text || '(nenhum)'}\n\nPERGUNTA INCLUÍDA NO VÍDEO:\n${clip.question || '(nenhuma)'}\n\nTRANSCRIPT (resposta):\n${clip.transcript}\n\nSCORE DO SELECIONADOR (0-10):\n${clip.viral_score}\n\nVIRAL REASON:\n${clip.viral_reason}\n\nDURATION:\n${clip.duration}s`,\n    },\n  },\n}));"
       }
     },
     {
@@ -342,7 +342,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ video_id: $json.source_video_id, clip_id: $json.clip_id, parts: $json.parts, context_text: $json.question ? '' : $json.context_text, cover_band: 'auto', source_label: $json.source_channel, sentence_fixes: $json.sentence_fixes }) }}"
+        "jsonBody": "={{ JSON.stringify({ video_id: $json.source_video_id, clip_id: $json.clip_id, parts: $json.parts, context_text: $json.question ? '' : $json.context_text, cover_band: 'auto', source_label: $json.source_channel, sentence_fixes: $json.sentence_fixes, brand_name: $('CONFIG').first().json.channel_name, template: $('CONFIG').first().json.template, theme: $json.theme, headline_kicker: $json.headline_kicker, headline_text: $json.headline_text }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {
@@ -364,7 +364,7 @@
         200
       ],
       "parameters": {
-        "jsCode": "const res = $input.first().json;\nif (!res?.job_id) throw new Error(`RENDER_SUBMIT_FAILED: ${JSON.stringify(res).slice(0, 300)}`);\nreturn [{ json: { ...$('APPLY PROOFREAD').first().json, job_id: res.job_id } }];"
+        "jsCode": "const res = $input.first().json;\nif (!res?.job_id) throw new Error(`RENDER_SUBMIT_FAILED: ${JSON.stringify(res).slice(0, 300)}`);\nreturn [{ json: { ...$('VALIDATE METADATA').first().json, job_id: res.job_id } }];"
       }
     },
     {
@@ -483,7 +483,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "// Proofreads the captions of the selected clip: only evident ASR errors, never style or meaning.\nconst clip = $input.first().json;\nconst prep = $('BUILD FINDER REQUEST').first().json.result;\nconst ids = new Set();\nfor (const p of clip.parts) for (let i = p.start_id; i <= p.end_id; i++) ids.add(i);\nconst sentences = prep.sentences.filter((s) => ids.has(s.id));\nconst around = prep.sentences.filter((s) => s.id >= Math.min(...ids) - 4 && s.id <= Math.max(...ids) + 2);\n\nconst SYSTEM = `Você revisa legendas geradas por transcrição automática (Whisper) de um vídeo em português.\n\nCorrija SOMENTE erros evidentes de transcrição: nomes próprios, números, datas, siglas,\ninstituições, e palavras trocadas por outras de som parecido que o CONTEXTO deixa claro\n(ex.: \"presos do Rio de Janeiro\" quando o assunto são os presos do 8 de janeiro).\n\nNÃO reescreva o estilo, NÃO corrija a gramática da fala, NÃO remova hesitações ou repetições,\nNÃO resuma, NÃO mude o sentido. Na dúvida, não corrija.\n\nRetorne apenas as frases que precisam de correção, com o texto COMPLETO corrigido da frase,\ne em \"changes\" descreva cada troca no formato \"antes → depois\".`;\n\nconst schema = {\n  type: 'object', additionalProperties: false, required: ['fixes'],\n  properties: { fixes: { type: 'array', items: {\n    type: 'object', additionalProperties: false, required: ['id', 'text', 'changes'],\n    properties: { id: { type: 'integer' }, text: { type: 'string' }, changes: { type: 'array', items: { type: 'string' } } },\n  } } },\n};\n\nreturn [{ json: { ...clip, request: { provider: 'auto', system: SYSTEM, schema, prompt:\n`VÍDEO: \"${prep.title}\" — ${prep.channel}\n\nCONTEXTO (frases ao redor, não corrigir):\n${around.map((s) => `[${s.id}] ${s.text}`).join('\\n')}\n\nFRASES A REVISAR:\n${sentences.map((s) => `[${s.id}] ${s.text}`).join('\\n')}` } } }];"
+        "jsCode": "const S = $('CONFIG').first().json; // channel_name, subject_name, subject_notes\n// Proofreads the captions of the selected clip: only evident ASR errors, never style or meaning.\nconst clip = $input.first().json;\nconst prep = $('BUILD FINDER REQUEST').first().json.result;\nconst ids = new Set();\nfor (const p of clip.parts) for (let i = p.start_id; i <= p.end_id; i++) ids.add(i);\nconst sentences = prep.sentences.filter((s) => ids.has(s.id));\nconst around = prep.sentences.filter((s) => s.id >= Math.min(...ids) - 4 && s.id <= Math.max(...ids) + 2);\n\nconst SYSTEM = `Você revisa legendas geradas por transcrição automática (Whisper) de um vídeo em português.\nPessoa principal do vídeo: ${S.subject_name} (${S.subject_notes}).\n\nCorrija SOMENTE erros evidentes de transcrição: nomes próprios, números, datas, siglas,\ninstituições, e palavras trocadas por outras de som parecido que o CONTEXTO deixa claro\n(ex.: \"presos do Rio de Janeiro\" quando o assunto são os presos do 8 de janeiro).\n\nNÃO reescreva o estilo, NÃO corrija a gramática da fala, NÃO remova hesitações ou repetições,\nNÃO resuma, NÃO mude o sentido. Na dúvida, não corrija.\n\nRetorne apenas as frases que precisam de correção, com o texto COMPLETO corrigido da frase,\ne em \"changes\" descreva cada troca no formato \"antes → depois\".`;\n\nconst schema = {\n  type: 'object', additionalProperties: false, required: ['fixes'],\n  properties: { fixes: { type: 'array', items: {\n    type: 'object', additionalProperties: false, required: ['id', 'text', 'changes'],\n    properties: { id: { type: 'integer' }, text: { type: 'string' }, changes: { type: 'array', items: { type: 'string' } } },\n  } } },\n};\n\nreturn [{ json: { ...clip, request: { provider: 'auto', system: SYSTEM, schema, prompt:\n`VÍDEO: \"${prep.title}\" — ${prep.channel}\n\nCONTEXTO (frases ao redor, não corrigir):\n${around.map((s) => `[${s.id}] ${s.text}`).join('\\n')}\n\nFRASES A REVISAR:\n${sentences.map((s) => `[${s.id}] ${s.text}`).join('\\n')}` } } }];"
       }
     },
     {
@@ -669,7 +669,7 @@
         500
       ],
       "parameters": {
-        "jsCode": "// Idempotency (docs/plan.md §31): skip videos already in flight or published, unless forced.\nconst config = $('CONFIG').first().json;\nconst row = $input.all().map((i) => i.json).find((r) => r.youtube_id === config.source_video_id);\nconst STALE_MS = 2 * 60 * 60 * 1000; // a PROCESSING row older than this is a crashed run\nconst now = new Date();\nif (row && !config.force_reprocess) {\n  const active = ['PROCESSING', 'CLIPPED', 'SELECTED'].includes(row.status);\n  const stale = active && now - new Date(row.updated_at) > STALE_MS;\n  if (row.status === 'UPLOADED' || (active && !stale)) {\n    console.log(`SKIPPED_DUPLICATE: ${config.source_video_id} is ${row.status} (youtube_output_id=${row.youtube_output_id || '-'})`);\n    return [];\n  }\n}\nreturn [{ json: {\n  youtube_id: config.source_video_id,\n  source_url: config.source_url,\n  execution_id: String($execution.id),\n  status: 'PROCESSING',\n  error_reason: '',\n  discovered_at: row?.discovered_at ?? now.toISOString(),\n  created_at: row?.created_at ?? now.toISOString(),\n  updated_at: now.toISOString(),\n} }];"
+        "jsCode": "// Idempotency (docs/plan.md §31): skip videos already in flight or published, unless forced.\nconst config = $('CONFIG').first().json;\nconst row = $input.all().map((i) => i.json).find((r) => r.youtube_id === config.source_video_id);\nconst STALE_MS = 2 * 60 * 60 * 1000; // a PROCESSING row older than this is a crashed run\nconst now = new Date();\n// Test runs (upload=false) never touch the real row and skip the duplicate check.\nconst key = config.upload ? config.source_video_id : `${config.source_video_id}:dryrun`;\nif (config.upload && row && !config.force_reprocess) {\n  const active = ['PROCESSING', 'CLIPPED', 'SELECTED'].includes(row.status);\n  const stale = active && now - new Date(row.updated_at) > STALE_MS;\n  if (row.status === 'UPLOADED' || (active && !stale)) {\n    console.log(`SKIPPED_DUPLICATE: ${config.source_video_id} is ${row.status} (youtube_output_id=${row.youtube_output_id || '-'})`);\n    return [];\n  }\n}\nreturn [{ json: {\n  youtube_id: key,\n  source_url: config.source_url,\n  execution_id: String($execution.id),\n  status: 'PROCESSING',\n  error_reason: '',\n  discovered_at: row?.discovered_at ?? now.toISOString(),\n  created_at: row?.created_at ?? now.toISOString(),\n  updated_at: now.toISOString(),\n} }];"
       }
     },
     {
@@ -718,7 +718,7 @@
         100
       ],
       "parameters": {
-        "jsCode": "// Title + description (docs/plan.md §24-25) in a single call.\nconst clip = $input.first().json;\nconst SYSTEM = `Você é editor de YouTube Shorts de um canal independente (canal de fã, não oficial)\ncom declarações públicas de Lucas Pavanato. Grafia correta do nome: Pavanato (um T).\n\nTÍTULO\n- Alta retenção, despertando curiosidade SEM inventar fatos e sem alterar o significado da fala.\n- Prefira: curiosidade, contraste, resposta, surpresa, conflito real, assunto atual, afirmação\n  forte realmente existente no vídeo.\n- Evite: clickbait falso, caixa alta excessiva, afirmações não presentes, insultos, inferências\n  sobre intenção, propaganda política personalizada.\n- Máximo 70 caracteres. Sem hashtags no título. Crie 5 opções e escolha a melhor.\n\nDESCRIÇÃO\n- Máximo 350 caracteres. NÃO inclua URL, linha de fonte, aviso de canal de fã nem hashtags:\n  isso é adicionado automaticamente depois.\n- Explique brevemente o contexto, deixe claro que é um trecho, identifique a fonte original,\n  não atribua nada que não tenha sido dito, tom editorial.\n\nTAGS: 5 a 8 tags curtas em português (sem #).\nHASHTAGS: 3 a 5, sem espaços, começando com #; não inclua #LucasPavanato nem #Shorts (já entram).`;\n\nconst schema = {\n  type: 'object', additionalProperties: false,\n  required: ['title', 'alternatives', 'hook', 'description', 'tags', 'hashtags'],\n  properties: {\n    title: { type: 'string' }, alternatives: { type: 'array', items: { type: 'string' } },\n    hook: { type: 'string' }, description: { type: 'string' },\n    tags: { type: 'array', items: { type: 'string' } }, hashtags: { type: 'array', items: { type: 'string' } },\n  },\n};\nreturn [{ json: { ...clip, request: { provider: 'auto', system: SYSTEM, schema, prompt:\n`FONTE: ${clip.source_channel} — \"${clip.source_title}\"\nURL: ${clip.source_url}\n\nCONTEXTO: ${clip.context_text || '-'}\nPERGUNTA INCLUÍDA: ${clip.question || '-'}\nASSUNTO: ${clip.main_topic}\n\nTRANSCRIÇÃO DA RESPOSTA:\n${clip.transcript}` } } }];"
+        "jsCode": "const S = $('CONFIG').first().json; // channel_name, subject_name, subject_notes\n// Title + description (docs/plan.md §24-25) in a single call.\nconst clip = $input.first().json;\nconst SYSTEM = `Você é editor de YouTube Shorts do canal independente e não oficial \"${S.channel_name}\",\nque publica trechos de declarações públicas. Este vídeo é de ${S.subject_name} (${S.subject_notes}).\n\nTÍTULO\n- Alta retenção, despertando curiosidade SEM inventar fatos e sem alterar o significado da fala.\n- Prefira: curiosidade, contraste, resposta, surpresa, conflito real, assunto atual, afirmação\n  forte realmente existente no vídeo.\n- Evite: clickbait falso, caixa alta excessiva, afirmações não presentes, insultos, inferências\n  sobre intenção, propaganda política personalizada.\n- Máximo 70 caracteres. Sem hashtags no título. Crie 5 opções e escolha a melhor.\n\nDESCRIÇÃO\n- Máximo 350 caracteres. NÃO inclua URL, linha de fonte, aviso de canal nem hashtags:\n  isso é adicionado automaticamente depois.\n- Explique brevemente o contexto, deixe claro que é um trecho, identifique a fonte original,\n  não atribua nada que não tenha sido dito, tom editorial.\n\nMANCHETE NO VÍDEO (aparece em duas faixas sobre o vídeo, estilo canal de cortes políticos):\n- headline_kicker: UMA expressão de impacto, escolha a que combina com a fala:\n  \"EITA!\", \"OLHA ISSO!\", \"ATENÇÃO!\", \"CONCORDA?\", \"POLÊMICA!\", \"SINCERÃO!\", \"RESPONDEU!\",\n  \"URGENTE!\" (só se o tema for notícia do dia), \"BOMBA!\" (só se a fala revela algo novo e grave).\n  Nunca use \"EXCLUSIVO!\".\n- headline_text: até 32 caracteres, caixa alta, sujeito + verbo forte, ATRIBUÍVEL à fala\n  (ex.: \"PAVANATO DETONA O PT\", \"PAVANATO RESPONDE JORNALISTA\"). Pode ser enfático, mas não pode\n  afirmar fato que não está na fala nem acusar alguém de crime.\n\nTAGS: 5 a 8 tags curtas em português (sem #).\nHASHTAGS: 3 a 5, sem espaços, começando com #; não inclua #${S.subject_name.replace(/\\s+/g, '')} nem #Shorts (já entram).`;\n\nconst schema = {\n  type: 'object', additionalProperties: false,\n  required: ['title', 'alternatives', 'hook', 'description', 'tags', 'hashtags', 'headline_kicker', 'headline_text'],\n  properties: {\n    title: { type: 'string' }, alternatives: { type: 'array', items: { type: 'string' } },\n    hook: { type: 'string' }, description: { type: 'string' },\n    tags: { type: 'array', items: { type: 'string' } }, hashtags: { type: 'array', items: { type: 'string' } },\n    headline_kicker: { type: 'string' }, headline_text: { type: 'string' },\n  },\n};\nreturn [{ json: { ...clip, request: { provider: 'auto', system: SYSTEM, schema, prompt:\n`FONTE: ${clip.source_channel} — \"${clip.source_title}\"\nURL: ${clip.source_url}\n\nCONTEXTO: ${clip.context_text || '-'}\nPERGUNTA INCLUÍDA: ${clip.question || '-'}\nASSUNTO: ${clip.main_topic}\n\nTRANSCRIÇÃO DA RESPOSTA:\n${clip.transcript}` } } }];"
       }
     },
     {
@@ -765,7 +765,7 @@
         100
       ],
       "parameters": {
-        "jsCode": "// Validates metadata and appends the mandatory source/notice lines (never left to the LLM).\nconst res = $input.first().json;\nconst { request, ...clip } = $('BUILD METADATA REQUEST').first().json;\nif (!res?.ok || !res.json?.title) throw new Error(`${res?.error_code ?? 'LLM_INVALID_JSON'}: metadata ${res?.error_message ?? 'missing title'}`);\nconst m = res.json;\n\nconst clean = (s) => String(s || '').replace(/[<>]/g, '').replace(/\\s+/g, ' ').trim();\nlet title = clean(m.title).replace(/#\\S+/g, '').trim();\nif (!title) throw new Error('LLM_INVALID_JSON: empty title');\nif (title.length > 100) title = title.slice(0, 97).replace(/\\s+\\S*$/, '') + '...';\nif (/pavanatto/i.test(title + m.description)) throw new Error('METADATA_INVALID: misspelled name (Pavanatto)');\n\nconst tag = (h) => '#' + String(h).replace(/^#/, '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9_]/g, '');\nconst hashtags = [...new Set(['#LucasPavanato', ...(m.hashtags || []).map(tag), '#Shorts'])].filter((h) => h.length > 2).slice(0, 6);\nlet body = clean(m.description);\nif (body.length > 400) body = body.slice(0, 397).replace(/\\s+\\S*$/, '') + '...';\nconst description = [\n  body,\n  '',\n  `Fonte: ${clip.source_channel} — ${clip.source_url}`,\n  'Trecho editado. Canal de fã, independente e não oficial; não representa Lucas Pavanato nem sua equipe.',\n  '',\n  hashtags.join(' '),\n].join('\\n');\nconst tags = [...new Set(['Lucas Pavanato', 'Pavanato', ...(m.tags || []).map(clean)])].filter(Boolean).slice(0, 12);\n\nreturn [{ json: { ...clip, title, title_alternatives: m.alternatives, hook: m.hook, description, tags } }];"
+        "jsCode": "const S = $('CONFIG').first().json; // channel_name, subject_name, subject_notes\n// Validates metadata and appends the mandatory source/notice lines (never left to the LLM).\nconst res = $input.first().json;\nconst { request, ...clip } = $('BUILD METADATA REQUEST').first().json;\nif (!res?.ok || !res.json?.title) throw new Error(`${res?.error_code ?? 'LLM_INVALID_JSON'}: metadata ${res?.error_message ?? 'missing title'}`);\nconst m = res.json;\n\nconst clean = (s) => String(s || '').replace(/[<>]/g, '').replace(/\\s+/g, ' ').trim();\nlet title = clean(m.title).replace(/#\\S+/g, '').trim();\nif (!title) throw new Error('LLM_INVALID_JSON: empty title');\nif (title.length > 100) title = title.slice(0, 97).replace(/\\s+\\S*$/, '') + '...';\nconst bad = (S.subject_misspellings || []).find((x) => new RegExp(`\\\\b${x}\\\\b`, 'i').test(title + ' ' + m.description));\nif (bad) throw new Error(`METADATA_INVALID: misspelled name (${bad})`);\n\nconst tag = (h) => '#' + String(h).replace(/^#/, '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9_]/g, '');\nconst subjectTag = tag(S.subject_name);\nconst extra = [...new Set((m.hashtags || []).map(tag))].filter((h) => h.length > 2 && h !== subjectTag && h.toLowerCase() !== '#shorts');\nconst hashtags = [subjectTag, ...extra.slice(0, 4), '#Shorts'];\n// The source line is added below; drop any \"Fonte...\" sentence the model wrote anyway.\nlet body = clean(m.description).replace(/(^|\\s)Fonte( original)?\\s*:.*?(\\.(?=\\s|$)|$)/gi, ' ').replace(/\\s+/g, ' ').trim();\nif (body.length > 400) body = body.slice(0, 397).replace(/\\s+\\S*$/, '') + '...';\nconst description = [\n  body,\n  '',\n  `Fonte: ${clip.source_channel} — ${clip.source_url}`,\n  `Trecho editado. ${S.channel_name} é um canal independente, sem vínculo com as pessoas exibidas.`,\n  '',\n  hashtags.join(' '),\n].join('\\n');\nconst tags = [...new Set([S.subject_name, S.subject_name.split(' ').slice(-1)[0], S.channel_name, ...(m.tags || []).map(clean)])].filter(Boolean).slice(0, 12);\n\n// On-video headline: controlled kicker list, short attributable line, theme by urgency.\nconst KICKERS = ['EITA!', 'OLHA ISSO!', 'ATENÇÃO!', 'CONCORDA?', 'POLÊMICA!', 'SINCERÃO!', 'RESPONDEU!', 'URGENTE!', 'BOMBA!'];\nlet kicker = clean(m.headline_kicker).toUpperCase();\nif (!KICKERS.includes(kicker)) kicker = 'EITA!';\nlet headline = clean(m.headline_text).toUpperCase().replace(/#\\S+/g, '').trim();\nif (!headline) headline = title.toUpperCase();\nif (headline.length > 34) headline = headline.slice(0, 34).replace(/\\s+\\S*$/, '');\nconst theme = ['URGENTE!', 'BOMBA!'].includes(kicker) ? 'alerta' : 'brasil';\n\nreturn [{ json: { ...clip, headline_kicker: kicker, headline_text: headline, theme, title, title_alternatives: m.alternatives, hook: m.hook, description, tags } }];"
       }
     },
     {
@@ -778,7 +778,7 @@
         250
       ],
       "parameters": {
-        "jsCode": "const c = $input.first().json;\nreturn [{ json: {\n  youtube_id: c.source_video_id, source_channel: c.source_channel, source_title: c.source_title,\n  best_clip_id: c.clip_id, editorial_score: c.score, editorial_risk: c.risk, below_threshold: !!c.below_threshold,\n  title: c.title, video_file: c.video_file, status: 'SELECTED', updated_at: new Date().toISOString(),\n} }];"
+        "jsCode": "const c = $input.first().json;\nreturn [{ json: {\n  youtube_id: $('CONFIG').first().json.upload ? c.source_video_id : `${c.source_video_id}:dryrun`, source_channel: c.source_channel, source_title: c.source_title,\n  best_clip_id: c.clip_id, editorial_score: c.score, editorial_risk: c.risk, below_threshold: !!c.below_threshold,\n  title: c.title, video_file: c.video_file, status: $('CONFIG').first().json.upload ? 'SELECTED' : 'DRY_RUN', updated_at: new Date().toISOString(),\n} }];"
       }
     },
     {
@@ -828,7 +828,7 @@
       ],
       "parameters": {
         "operation": "read",
-        "fileSelector": "={{ $('VALIDATE METADATA').first().json.video_file }}",
+        "fileSelector": "={{ $('DONE').first().json.video_file }}",
         "options": {
           "dataPropertyName": "video"
         }
@@ -863,7 +863,7 @@
       "credentials": {
         "youTubeOAuth2Api": {
           "id": "youtubeOAuth00001",
-          "name": "YouTube (canal Pavanato Agora)"
+          "name": "YouTube (Radar Patriota)"
         }
       },
       "retryOnFail": true,
@@ -929,7 +929,7 @@
         100
       ],
       "parameters": {
-        "jsCode": "const meta = $('VALIDATE METADATA').first().json;\nconst up = $input.first().json;\nreturn [{ json: {\n  status: 'UPLOADED', youtube_url: `https://youtu.be/${up.youtube_output_id}`, studio_url: `https://studio.youtube.com/video/${up.youtube_output_id}/edit`,\n  title: meta.title, description: meta.description, tags: meta.tags, title_alternatives: meta.title_alternatives,\n  clip_id: meta.clip_id, score: meta.score, risk: meta.risk, below_threshold: !!meta.below_threshold,\n  video_file: meta.video_file, source_url: meta.source_url,\n} }];"
+        "jsCode": "const meta = $('VALIDATE METADATA').first().json;\nconst up = $input.first().json;\nreturn [{ json: {\n  status: 'UPLOADED', youtube_url: `https://youtu.be/${up.youtube_output_id}`, studio_url: `https://studio.youtube.com/video/${up.youtube_output_id}/edit`,\n  title: meta.title, description: meta.description, tags: meta.tags, title_alternatives: meta.title_alternatives,\n  clip_id: meta.clip_id, score: meta.score, risk: meta.risk, below_threshold: !!meta.below_threshold,\n  video_file: $('DONE').first().json.video_file, headline: `${meta.headline_kicker} ${meta.headline_text}`, source_url: meta.source_url,\n} }];"
       }
     },
     {
@@ -954,6 +954,39 @@
           "id": "llmBridgeAuth0001",
           "name": "LLM Bridge (local)"
         }
+      }
+    },
+    {
+      "id": "f2d",
+      "name": "Upload?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5610,
+        250
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cu",
+              "leftValue": "={{ $('CONFIG').first().json.upload }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
       }
     }
   ],
@@ -1229,7 +1262,7 @@
       "main": [
         [
           {
-            "node": "CLIPPER RENDER",
+            "node": "BUILD METADATA REQUEST",
             "type": "main",
             "index": 0
           }
@@ -1284,7 +1317,7 @@
       "main": [
         [
           {
-            "node": "BUILD METADATA REQUEST",
+            "node": "SELECTED ROW",
             "type": "main",
             "index": 0
           }
@@ -1317,7 +1350,7 @@
       "main": [
         [
           {
-            "node": "SELECTED ROW",
+            "node": "CLIPPER RENDER",
             "type": "main",
             "index": 0
           }
@@ -1339,7 +1372,7 @@
       "main": [
         [
           {
-            "node": "READ MP4",
+            "node": "Upload?",
             "type": "main",
             "index": 0
           }
@@ -1399,6 +1432,18 @@
             "index": 0
           }
         ]
+      ]
+    },
+    "Upload?": {
+      "main": [
+        [
+          {
+            "node": "READ MP4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
       ]
     }
   },

@@ -22,10 +22,34 @@ FFPROBE = os.environ.get('FFPROBE_BIN', '/opt/homebrew/bin/ffprobe')
 YTDLP = os.environ.get('YTDLP_BIN', '/opt/homebrew/bin/yt-dlp')
 CACHE = Path(os.environ.get('CLIPPER_CACHE', '/Volumes/MacNVMe/pavanatto-cuts/clipper-cache'))
 WHISPER_MODEL = os.environ.get('WHISPER_MODEL', 'mlx-community/whisper-large-v3-turbo')
-FONT_BOLD = os.environ.get('CLIPPER_FONT', '/System/Library/Fonts/Supplemental/Arial Black.ttf')
+FONT_BOLD = os.environ.get('CLIPPER_FONT') or (
+    str(CACHE / 'fonts' / 'Montserrat-Black.ttf') if (CACHE / 'fonts' / 'Montserrat-Black.ttf').exists()
+    else '/System/Library/Fonts/Supplemental/Arial Black.ttf')
 FONT_TEXT = os.environ.get('CLIPPER_FONT_TEXT', '/System/Library/Fonts/Supplemental/Arial Bold.ttf')
 
 OUT_W, OUT_H = 1080, 1920
+BRAND_NAME = os.environ.get('CLIPPER_BRAND', 'Radar Patriota')
+BRAND_NOTICE = 'CANAL INDEPENDENTE'
+FONTS = CACHE / 'fonts'
+MONT_BLACK = str(FONTS / 'Montserrat-Black.ttf')
+MONT_XB = str(FONTS / 'Montserrat-ExtraBold.ttf')
+MONT_XB_ITALIC = str(FONTS / 'Montserrat-ExtraBoldItalic.ttf')
+
+# "alerta" template layout (1080x1920): image on top, headline bars, clip below.
+ALERTA_IMG_H = 830
+ALERTA_KICKER = (660, 170)  # y, height (overlaps the bottom of the image)
+ALERTA_SUB = (830, 96)
+ALERTA_VIDEO_Y = 926
+ALERTA_CAPTION_Y = 1290
+
+THEMES = {
+    # Brazil palette: green bar / white text, yellow bar / navy text.
+    'brasil': {'kicker_bg': (0, 146, 63), 'kicker_fg': (255, 255, 255), 'sub_bg': (255, 214, 0),
+               'sub_fg': (0, 39, 118), 'chip_bg': (0, 39, 118), 'chip_fg': (255, 214, 0)},
+    # Red alert variant (URGENTE/BOMBA style).
+    'alerta': {'kicker_bg': (214, 24, 32), 'kicker_fg': (255, 255, 255), 'sub_bg': (255, 214, 0),
+               'sub_fg': (10, 10, 10), 'chip_bg': (0, 146, 63), 'chip_fg': (255, 255, 255)},
+}
 ANALYSIS_FPS = 5
 CAPTION_Y = int(OUT_H * 0.64)
 NAME_TAG_EXTENSION = 0.055
@@ -457,13 +481,13 @@ def caption_image(words: tuple[str, ...], active: int, highlight: bool = True):
     return np.array(img)
 
 
-@lru_cache(maxsize=1)
-def branding_image():
+@lru_cache(maxsize=8)
+def branding_image(brand: str = BRAND_NAME):
     from PIL import Image, ImageDraw
 
     img = Image.new('RGBA', (OUT_W, 200), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    for text, size, y, alpha in (('PAVANATO AGORA', 44, 40, 235), ('CANAL FÃ • NÃO OFICIAL', 26, 98, 200)):
+    for text, size, y, alpha in ((brand.upper(), 44, 40, 235), (BRAND_NOTICE, 26, 98, 200)):
         f = font(size)
         x = (OUT_W - f.getlength(text)) / 2
         d.text((x, y), text, font=f, fill=(255, 255, 255, alpha), stroke_width=4, stroke_fill=(0, 0, 0, 160))
@@ -512,7 +536,7 @@ def label_pill(text: str):
 
 
 @lru_cache(maxsize=16)
-def cover_banner(height: int, source_label: str):
+def cover_banner(height: int, source_label: str, brand: str = BRAND_NAME):
     """Channel banner used to cover a broadcaster lower third (also carries the fan-channel notice)."""
     from PIL import Image, ImageDraw
 
@@ -520,8 +544,8 @@ def cover_banner(height: int, source_label: str):
     img = Image.new('RGBA', (OUT_W, height), (14, 14, 14, 250))
     d = ImageDraw.Draw(img)
     d.rectangle((0, 0, OUT_W, max(3, height // 30)), fill=YELLOW)
-    line1 = 'PAVANATO AGORA'
-    line2 = 'CANAL FÃ • NÃO OFICIAL' + (f'  •  FONTE: {source_label.upper()}' if source_label else '')
+    line1 = brand.upper()
+    line2 = BRAND_NOTICE + (f'  •  FONTE: {source_label.upper()}' if source_label else '')
     two_lines = height >= 90
     size1 = min(56, int(height * (0.30 if two_lines else 0.42)))
     f1 = font(size1)
@@ -585,6 +609,132 @@ def compose(frame: np.ndarray, cx: float | None, src_w: int, src_h: int) -> tupl
     y = (OUT_H - fh) // 2
     bg[y:y + fh] = fg
     return bg, (y, fh)
+
+
+# --- "alerta" template ----------------------------------------------------------
+
+def fit_font(text: str, path: str, max_w: int, start: int, minimum: int = 20):
+    size = start
+    f = font(size, path)
+    while f.getlength(text) > max_w and size > minimum:
+        size -= 2
+        f = font(size, path)
+    return f
+
+
+@lru_cache(maxsize=16)
+def headline_bars(kicker: str, text: str, theme_name: str):
+    """Kicker bar (e.g. 'BOMBA!') + subtitle bar, as one RGBA strip spanning both bars."""
+    from PIL import Image, ImageDraw
+
+    th = THEMES.get(theme_name, THEMES['brasil'])
+    ky, kh = ALERTA_KICKER
+    sy, sh_ = ALERTA_SUB
+    img = Image.new('RGBA', (OUT_W, sy + sh_ - ky), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rectangle((0, 0, OUT_W, kh), fill=(*th['kicker_bg'], 255))
+    d.rectangle((0, sy - ky, OUT_W, sy - ky + sh_), fill=(*th['sub_bg'], 255))
+    kicker = kicker.upper().strip()
+    f = fit_font(kicker, MONT_BLACK, OUT_W - 70, 156, 60)
+    bb = f.getbbox(kicker)
+    x = (OUT_W - (bb[2] - bb[0])) / 2 - bb[0]
+    y = (kh - (bb[3] - bb[1])) / 2 - bb[1]
+    d.text((x + 5, y + 6), kicker, font=f, fill=(0, 0, 0, 90))  # soft drop shadow
+    d.text((x, y), kicker, font=f, fill=(*th['kicker_fg'], 255))
+    text = text.upper().strip()
+    f2 = fit_font(text, MONT_XB_ITALIC, OUT_W - 60, 66, 30)
+    bb = f2.getbbox(text)
+    d.text(((OUT_W - (bb[2] - bb[0])) / 2 - bb[0], sy - ky + (sh_ - (bb[3] - bb[1])) / 2 - bb[1]), text,
+           font=f2, fill=(*th['sub_fg'], 255))
+    return np.array(img)
+
+
+@lru_cache(maxsize=16)
+def chip(text: str, theme_name: str, size: int = 32):
+    from PIL import Image, ImageDraw
+
+    th = THEMES.get(theme_name, THEMES['brasil'])
+    f = font(size, MONT_BLACK)
+    bb = f.getbbox(text)
+    w, h = int(bb[2] - bb[0]) + 44, int(bb[3] - bb[1]) + 26
+    img = Image.new('RGBA', (OUT_W, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((36, 0, 36 + w, h), radius=h // 2, fill=(*th['chip_bg'], 240))
+    d.text((36 + 22 - bb[0], 13 - bb[1]), text, font=f, fill=(*th['chip_fg'], 255))
+    return np.array(img)
+
+
+@lru_cache(maxsize=8)
+def source_tag(text: str):
+    from PIL import Image, ImageDraw
+
+    f = font(26, MONT_XB)
+    img = Image.new('RGBA', (OUT_W, 44), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.text((40, 6), text, font=f, fill=(255, 255, 255, 235), stroke_width=3, stroke_fill=(0, 0, 0, 170))
+    return np.array(img)
+
+
+def cover_crop(img: np.ndarray, w: int, h: int, cx: float = 0.5, cy: float = 0.5) -> np.ndarray:
+    import cv2
+
+    ih, iw = img.shape[:2]
+    scale = max(w / iw, h / ih)
+    cw, ch = int(round(w / scale)), int(round(h / scale))
+    x = int(min(max(cx * iw - cw / 2, 0), iw - cw))
+    y = int(min(max(cy * ih - ch / 2, 0), ih - ch))
+    return cv2.resize(img[y:y + ch, x:x + cw], (w, h), interpolation=cv2.INTER_LANCZOS4)
+
+
+def top_image(src: Path, plan: list[dict], sw: int, sh: int, override: str | None) -> np.ndarray:
+    """Top panel: a user image if given, else the sharpest big-face frame of the answer."""
+    import cv2
+
+    w, h = OUT_W, ALERTA_IMG_H
+    if override and Path(override).is_file():
+        img = cv2.imread(override)
+        if img is not None:
+            return sharpen(cover_crop(img, w, h, 0.5, 0.4))
+    best = None
+    for p in plan:
+        if p.get('role') == 'question':
+            continue
+        for f in p['frames']:
+            for face in f['faces']:
+                if best is None or face.size > best[1].size:
+                    best = (p['start'] + f['t'], face)
+    if best is None:
+        frame = grab_frame(src, plan[-1]['start'] + plan[-1]['dur'] / 2, sw, sh)
+        return cover_crop(frame, w, h)
+    t, face = best
+    frame = grab_frame(src, t, sw, sh)
+    aspect = w / h
+    crop_h = min(sh, max(0.45 * sh, face.size * sh * 2.6))
+    crop_w = min(sw, crop_h * aspect)
+    crop_h = crop_w / aspect
+    x = int(min(max(face.cx * sw - crop_w / 2, 0), sw - crop_w))
+    # Broadcasters put logos in the top corners: start below them when the crop allows it.
+    y_min = min(0.08 * sh, sh - crop_h)
+    y = int(min(max(face.cy * sh - crop_h * 0.42, y_min), sh - crop_h))
+    out = cv2.resize(frame[y:y + int(crop_h), x:x + int(crop_w)], (w, h), interpolation=cv2.INTER_LANCZOS4)
+    return sharpen(out)
+
+
+def compose_region(frame: np.ndarray, cx: float | None, sw: int, sh: int, rw: int, rh: int,
+                   usable_h: int) -> np.ndarray:
+    """Fills an rw x rh region from the top `usable_h` rows of the frame (drops a bottom ticker)."""
+    import cv2
+
+    src = frame[:usable_h]
+    if cx is not None:
+        return sharpen(cover_crop(src, rw, rh, cx, 0.5))
+    bg = cv2.GaussianBlur(cover_crop(src, rw, rh), (0, 0), 30)
+    bg = (bg * 0.6).astype(np.uint8)
+    fh = int(rw * usable_h / sw)
+    fg = cv2.resize(src, (rw, fh), interpolation=cv2.INTER_AREA)
+    y = (rh - fh) // 2
+    bg[y:y + fh] = fg
+    return bg
 
 
 # --- render -----------------------------------------------------------------
@@ -661,7 +811,9 @@ def trim_micro_shots(frames: list[dict], words_rel: list[dict], dur: float, limi
 
 def render(workdir: Path, transcript: dict, parts: list[dict], out_path: Path, *,
            context_text: str | None = None, cover_band: list[float] | None = None,
-           source_label: str = '', sentence_fixes: dict | None = None) -> dict:
+           source_label: str = '', sentence_fixes: dict | None = None, brand: str = BRAND_NAME,
+           template: str = 'alerta', headline_kicker: str = '', headline_text: str = '',
+           theme: str = 'brasil', top_image_path: str | None = None) -> dict:
     """parts: [{start_id, end_id, role: 'question'|'answer', skip_words_start?, skip_words_end?}] in order."""
     src = find(workdir, 'video')
     audio = find(workdir, 'audio')
@@ -686,7 +838,7 @@ def render(workdir: Path, transcript: dict, parts: list[dict], out_path: Path, *
             start, end = start + head, start + tail
             dur = end - start
         plan.append({**p, 'start': start, 'end': end, 'dur': dur, 'crops': plan_crops(frames, sw, sh),
-                     'words': rel, 'shots': len({f['shot'] for f in frames})})
+                     'words': rel, 'shots': len({f['shot'] for f in frames}), 'frames': frames})
 
     total = sum(p['dur'] for p in plan)
     if total > 180:
@@ -729,8 +881,24 @@ def render(workdir: Path, transcript: dict, parts: list[dict], out_path: Path, *
         '-movflags', '+faststart', str(tmp),
     ], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    brand = branding_image()
-    ctx_img = context_card(context_text) if context_text else None
+    alerta = template == 'alerta'
+    if alerta:
+        if not headline_kicker or not headline_text:
+            raise PipelineError('INVALID_PARAMS', 'alerta template needs headline_kicker and headline_text')
+        # Static parts of the frame are built once.
+        base = np.zeros((OUT_H, OUT_W, 3), np.uint8)
+        base[:ALERTA_IMG_H] = top_image(src, plan, sw, sh, top_image_path)
+        grad = np.linspace(0, 0.55, 220)[:, None, None]  # darken the image bottom for the source tag
+        base[ALERTA_IMG_H - 400:ALERTA_IMG_H - 180] = (base[ALERTA_IMG_H - 400:ALERTA_IMG_H - 180] * (1 - grad)).astype(np.uint8)
+        base[ALERTA_IMG_H - 180:ALERTA_IMG_H] = (base[ALERTA_IMG_H - 180:ALERTA_IMG_H] * 0.45).astype(np.uint8)
+        blend(base, chip(brand.upper(), theme), 40)
+        if source_label:
+            blend(base, source_tag(f'FONTE: {source_label.upper()}'), ALERTA_KICKER[0] - 56)
+        bars = headline_bars(headline_kicker, headline_text, theme)
+        usable_h = int(cover_band[0] * sh) if cover_band else sh
+        region_h = OUT_H - ALERTA_VIDEO_Y
+    brand_img = branding_image(brand)
+    ctx_img = context_card(context_text) if (context_text and not alerta) else None
     has_question = any(p.get('role') == 'question' for p in plan)
     ctx_until = plan[0]['dur'] if has_question else min(6.0, total)
     n_total = 0
@@ -747,13 +915,28 @@ def render(workdir: Path, transcript: dict, parts: list[dict], out_path: Path, *
                 d = next((c for c in crops if c['t0'] <= t < c['t1']), crops[-1] if crops else {'cx': None})
                 if d['cx'] is None:
                     fit_frames += 1
+                if alerta:
+                    out = base.copy()
+                    out[ALERTA_VIDEO_Y:] = compose_region(frame, d['cx'], sw, sh, OUT_W, region_h, usable_h)
+                    blend(out, bars, ALERTA_KICKER[0])
+                    cap_y = ALERTA_CAPTION_Y
+                    if p.get('role') == 'question':
+                        blend(out, label_pill('PERGUNTA'), cap_y - 80)
+                    while ci < len(timeline) and timeline[ci][1] <= tg:
+                        ci += 1
+                    if ci < len(timeline) and timeline[ci][0] <= tg:
+                        _, _, texts, active, hl = timeline[ci]
+                        blend(out, caption_image(texts, active, hl), cap_y)
+                    enc.stdin.write(out.tobytes())
+                    n_total += 1
+                    continue
                 out, (fy, fh) = compose(frame, d['cx'], sw, sh)
                 if cover_band:
                     y0 = fy + int(cover_band[0] * fh)
                     y1 = fy + int(cover_band[1] * fh)
-                    blend(out, cover_banner(y1 - y0, source_label), y0)
+                    blend(out, cover_banner(y1 - y0, source_label, brand), y0)
                 if not cover_band:  # without a bottom banner, the brand goes on top
-                    blend(out, brand, 60)
+                    blend(out, brand_img, 60)
                 if ctx_img is not None and tg < ctx_until:
                     fade = min(1.0, (ctx_until - tg) / 0.3)
                     blend(out, ctx_img, 190 if not cover_band else 90, opacity=fade)
@@ -785,6 +968,7 @@ def render(workdir: Path, transcript: dict, parts: list[dict], out_path: Path, *
         'frames': n_total,
         'fit_ratio': round(fit_frames / max(1, n_total), 3),
         'cover_band': cover_band,
+        'template': template,
         'source_video': src.name,
         'parts': [{'role': p.get('role', 'answer'), 'start': round(p['start'], 2), 'end': round(p['end'], 2),
                    'shots': p['shots'],

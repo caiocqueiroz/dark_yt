@@ -54,3 +54,16 @@ diarização (o finder infere o falante pelo contexto, o reframe usa movimento d
   "CANAL FÃ • NÃO OFICIAL • FONTE: <canal>". Com banner, a marca do topo sai.
 - **Nome:** a grafia correta é **Pavanato** (um T). Identificadores técnicos antigos
   (`pavanatto-n8n`, `com.pavanatto.*`, `pavanatto-cuts`) foram mantidos para não quebrar a infra.
+
+## D4 — Canal "Radar Patriota", multi-pessoa, template "alerta" (2026-10-07)
+
+- Canal: **Radar Patriota** (vários nomes da direita, não só Pavanato). Pessoa do vídeo é
+  parâmetro (`subject_name`/`subject_notes` no CONFIG ou `--subject` no run-pilot).
+- "Não oficial" saiu do vídeo; descrição mantém "canal independente, sem vínculo com as pessoas
+  exibidas" + "Fonte:" sempre visível (vídeo e descrição).
+- Template padrão **alerta** (referência: canais de cortes políticos): foto no topo (quadro do
+  vídeo-fonte ou imagem própria em `assets/`), faixa de impacto (Montserrat Black) + faixa amarela
+  (Montserrat ExtraBold Itálico), corte embaixo com legendas. Tema `brasil` (verde/amarelo/azul)
+  ou `alerta` (vermelho) para URGENTE!/BOMBA!. Letreiro da emissora é recortado fora.
+- Manchete gerada pela IA a partir de lista controlada (sem "EXCLUSIVO!"), atribuível à fala.
+- `template: classic` mantém o formato tela cheia anterior.
