@@ -28,59 +28,23 @@
         300
       ],
       "parameters": {
-        "jsCode": "// Edit these values for each manual run.\nconst config = {\n  source_url: 'https://www.youtube.com/watch?v=MQHIukVzupE',\n  source_title: 'LUCAS PAVANATO FALA SOBRE SUAS EXPECTATIVAS PARA INÍCIO DO MANDATO COMO DEPUTADO FEDERAL',\n  source_channel: 'Itatiaia',\n  pilot: true,\n  force_reprocess: false,\n  // Pilot only: if no clip reaches SCORING_V1, continue with the best non-HIGH clip as REVIEW.\n  allow_below_threshold: true,\n  // Set to reuse an existing Vizard project instead of creating (and paying for) a new one.\n  vizard_project_id: '35073699',\n};\n\nconst m = config.source_url.match(/(?:v=|youtu\\.be\\/|shorts\\/|live\\/)([A-Za-z0-9_-]{11})/);\nif (!m) throw new Error('CONFIG_INVALID: could not extract YouTube video id from source_url');\n\nreturn [{ json: { ...config, source_video_id: m[1], started_at: new Date().toISOString() } }];"
+        "jsCode": "// Edit these values for each manual run.\nconst config = {\n  source_url: 'https://www.youtube.com/watch?v=Sn3H5UzsDoY',\n  pilot: true,\n  force_reprocess: false,\n  // Pilot only: if no clip reaches SCORING_V1, continue with the best non-HIGH clip as REVIEW.\n  allow_below_threshold: true,\n  max_candidates: 10,\n};\n\nconst m = config.source_url.match(/(?:v=|youtu\\.be\\/|shorts\\/|live\\/)([A-Za-z0-9_-]{11})/);\nif (!m) throw new Error('CONFIG_INVALID: could not extract YouTube video id from source_url');\n\nreturn [{ json: { ...config, source_video_id: m[1], started_at: new Date().toISOString() } }];"
       }
     },
     {
-      "id": "a3",
-      "name": "Has Project?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
+      "id": "b1",
+      "name": "CLIPPER PREPARE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
         440,
         300
       ],
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "combinator": "and",
-          "conditions": [
-            {
-              "id": "c1",
-              "leftValue": "={{ String($json.vizard_project_id || '') }}",
-              "rightValue": "",
-              "operator": {
-                "type": "string",
-                "operation": "notEmpty",
-                "singleValue": true
-              }
-            }
-          ]
-        },
-        "options": {}
-      }
-    },
-    {
-      "id": "a4",
-      "name": "VIZARD CREATE",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        660,
-        400
-      ],
-      "parameters": {
         "method": "POST",
-        "url": "https://elb-api.vizard.ai/hvizard-server-front/open-api/v1/project/create",
+        "url": "http://host.docker.internal:8788/v1/prepare",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  lang: 'pt',\n  preferLength: [1, 2],\n  videoUrl: $json.source_url,\n  videoType: 2,\n  ratioOfClip: 1,\n  maxClipNumber: 10,\n  subtitleSwitch: 1,\n  headlineSwitch: 0,\n  highlightSwitch: 1,\n  emojiSwitch: 0,\n  removeSilenceSwitch: 1,\n  autoBrollSwitch: 0,\n  clipModel: 'clip_v2',\n  projectName: 'Pavanatto Pilot ' + $json.source_video_id\n}) }}",
         "options": {
           "response": {
             "response": {
@@ -89,57 +53,60 @@
             }
           },
           "timeout": 60000
-        }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source_url: $json.source_url }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {
-          "id": "vizardApiKey00001",
-          "name": "Vizard API"
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
         }
       },
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 5000
+      "waitBetweenTries": 3000
     },
     {
-      "id": "a5",
-      "name": "CHECK CREATE",
+      "id": "b2",
+      "name": "CHECK PREPARE SUBMIT",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        880,
-        400
+        660,
+        300
       ],
       "parameters": {
-        "jsCode": "const res = $input.first().json;\nconst config = $('CONFIG').first().json;\n\nconst messages = {\n  4001: 'Invalid API key', 4002: 'Project creation failed', 4003: 'Rate limit exceeded',\n  4004: 'Unsupported video format', 4005: 'Video file is broken', 4006: 'Illegal parameter',\n  4007: 'Insufficient remaining minutes', 4008: 'Cannot download video from URL',\n  4009: 'Invalid video URL', 4010: 'Cannot detect spoken language',\n};\n\nif (res?.code !== 2000 || !res?.projectId) {\n  const detail = messages[res?.code] ?? 'unexpected response';\n  throw new Error(`VIZARD_CREATE_FAILED: code=${res?.code} ${detail} ${res?.errMsg ?? ''}`.trim());\n}\n\nreturn [{ json: { ...config, vizard_project_id: String(res.projectId), vizard_share_link: res.shareLink ?? null } }];"
+        "jsCode": "const res = $input.first().json;\nif (!res?.job_id) throw new Error(`CLIPPER_SUBMIT_FAILED: ${JSON.stringify(res).slice(0, 300)}`);\nreturn [{ json: { ...$('CONFIG').first().json, job_id: res.job_id } }];"
       }
     },
     {
-      "id": "a6",
-      "name": "WAIT",
+      "id": "b3",
+      "name": "WAIT PREPARE",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        1100,
+        880,
         300
       ],
-      "webhookId": "5b0f6a0e-pavanatto-pilot-wait",
+      "webhookId": "pavanatto-b3",
       "parameters": {
         "amount": 30
       }
     },
     {
-      "id": "a7",
-      "name": "VIZARD QUERY",
+      "id": "b4",
+      "name": "PREPARE STATUS",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1320,
+        1100,
         300
       ],
       "parameters": {
         "method": "GET",
-        "url": "=https://elb-api.vizard.ai/hvizard-server-front/open-api/v1/project/query/{{ $('WAIT').item.json.vizard_project_id }}",
+        "url": "=http://host.docker.internal:8788/v1/jobs/{{ $json.job_id }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -154,34 +121,34 @@
       },
       "credentials": {
         "httpHeaderAuth": {
-          "id": "vizardApiKey00001",
-          "name": "Vizard API"
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
         }
       },
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 5000
+      "waitBetweenTries": 3000
     },
     {
-      "id": "a8",
-      "name": "CHECK STATUS",
+      "id": "b5",
+      "name": "CHECK PREPARE",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1540,
+        1320,
         300
       ],
       "parameters": {
-        "jsCode": "const MAX_POLLS = 40;\nconst res = $input.first().json;\nconst ctx = $('WAIT').first().json;\nconst poll = $runIndex + 1;\n\nif (res?.code === 1000) {\n  if (poll >= MAX_POLLS) throw new Error(`VIZARD_TIMEOUT: project ${ctx.vizard_project_id} still processing after ${poll} polls`);\n  return [{ json: { ...ctx, vizard_status: 'PROCESSING', polls: poll } }];\n}\nif (res?.code === 2000) {\n  if (!Array.isArray(res.videos)) throw new Error('VIZARD_INVALID_RESPONSE: code 2000 without videos array');\n  return [{ json: { ...ctx, vizard_status: 'COMPLETE', polls: poll, vizard: res } }];\n}\nthrow new Error(`VIZARD_QUERY_FAILED: code=${res?.code} ${res?.errMsg ?? ''}`.trim());"
+        "jsCode": "// Polls a clipper job; loops back to WAIT PREPARE while queued/running.\nconst MAX_POLLS = 120;\nconst res = $input.first().json;\nconst ctx = $('WAIT PREPARE').first().json;\nconst poll = $runIndex + 1;\n\nif (res?.status === 'queued' || res?.status === 'running') {\n  if (poll >= MAX_POLLS) throw new Error(`CLIPPER_TIMEOUT: job ${ctx.job_id} still ${res.status} after ${poll} polls`);\n  return [{ json: { ...ctx, job_status: res.status, polls: poll } }];\n}\nif (res?.status === 'done' && res.result) {\n  return [{ json: { ...ctx, job_status: 'done', polls: poll, result: res.result } }];\n}\nthrow new Error(`${res?.error_code ?? 'CLIPPER_FAILED'}: ${res?.error_message ?? JSON.stringify(res).slice(0, 300)}`);"
       }
     },
     {
-      "id": "a9",
-      "name": "Complete?",
+      "id": "b6",
+      "name": "Prepared?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1760,
+        1540,
         300
       ],
       "parameters": {
@@ -194,9 +161,9 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "c2",
-              "leftValue": "={{ $json.vizard_status }}",
-              "rightValue": "COMPLETE",
+              "id": "cb6",
+              "leftValue": "={{ $json.job_status }}",
+              "rightValue": "done",
               "operator": {
                 "type": "string",
                 "operation": "equals"
@@ -208,16 +175,66 @@
       }
     },
     {
-      "id": "a10",
-      "name": "NORMALIZE CLIPS",
+      "id": "b7",
+      "name": "BUILD FINDER REQUEST",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
+      "position": [
+        1760,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Asks the LLM to propose clip windows directly from the full transcript.\nconst ctx = $input.first().json;\nconst prep = ctx.result;\nconst config = $('CONFIG').first().json;\nif (!prep.segments?.length) throw new Error('TRANSCRIPT_EMPTY: no segments');\n\nconst mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;\nconst lines = prep.segments.map((s) => `[${s.id}] (${mmss(s.start)}) ${s.text}`).join('\\n');\n\nconst SYSTEM = `Você é editor de um canal independente de YouTube Shorts com declarações públicas\nde Lucas Pavanato. Você recebe a transcrição completa de um vídeo, segmentada e numerada.\n\nTAREFA\nProponha até ${config.max_candidates} trechos candidatos a Shorts.\n\nREGRAS\n- Somente trechos em que LUCAS PAVANATO é quem fala (identifique pelo contexto: apresentação\n  do entrevistador, perguntas dirigidas a ele, referências à própria trajetória). Se houver\n  outros entrevistados, NÃO selecione falas deles como conteúdo principal.\n- Duração entre 20 e 60 segundos (use os tempos mm:ss como referência).\n- Comece no início de uma frase completa, idealmente já no ponto mais forte (hook nos\n  primeiros 2–3 segundos). Evite começar com \"então\", \"e aí\", \"como eu falei\".\n- Termine numa conclusão natural, sem cortar a frase.\n- O trecho deve ser compreensível sozinho e NÃO pode alterar o sentido da fala.\n- Prefira: resposta forte, contraste, conflito real, dado concreto, posição clara, tema atual.\n- Não avalie se concorda politicamente. Não selecione com base em ideologia.\n- Os trechos não devem se sobrepor.\n\nUse start_id e end_id = números dos segmentos [n] (inclusive).\nspeaker_confidence: 0–100, quão certo você está de que é Lucas Pavanato falando.\nscore: 0–10, potencial de retenção.`;\n\nconst schema = {\n  type: 'object', additionalProperties: false, required: ['candidates'],\n  properties: {\n    candidates: {\n      type: 'array',\n      items: {\n        type: 'object', additionalProperties: false,\n        required: ['start_id', 'end_id', 'speaker_confidence', 'score', 'title_hint', 'why'],\n        properties: {\n          start_id: { type: 'integer' }, end_id: { type: 'integer' },\n          speaker_confidence: { type: 'integer', minimum: 0, maximum: 100 },\n          score: { type: 'number', minimum: 0, maximum: 10 },\n          title_hint: { type: 'string' }, why: { type: 'string' },\n        },\n      },\n    },\n  },\n};\n\nreturn [{ json: { ...ctx, request: { provider: 'auto', system: SYSTEM, schema,\n  prompt: `VÍDEO: \"${prep.title}\" — canal ${prep.channel} (publicado ${prep.upload_date})\\n\\nTRANSCRIÇÃO:\\n${lines}` } } }];"
+      }
+    },
+    {
+      "id": "b8",
+      "name": "AI CLIP FINDER",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
         1980,
         200
       ],
       "parameters": {
-        "jsCode": "const ctx = $input.first().json;\nconst videos = ctx.vizard.videos;\n\nconst parseTopics = (v) => {\n  if (Array.isArray(v)) return v;\n  try { const p = JSON.parse(v ?? '[]'); return Array.isArray(p) ? p : []; } catch { return []; }\n};\n\nconst clips = videos\n  .filter((v) => v && v.videoId && v.videoUrl)\n  .map((v) => ({\n    clip_id: String(v.videoId),\n    video_url: v.videoUrl,\n    duration: Math.round((Number(v.videoMsDuration) || 0) / 1000),\n    title: v.title ?? '',\n    transcript: v.transcript ?? '',\n    viral_score: Number(v.viralScore) || 0,\n    viral_reason: v.viralReason ?? '',\n    related_topic: parseTopics(v.relatedTopic).join(', '),\n    clip_editor_url: v.clipEditorUrl ?? null,\n    source_url: ctx.source_url,\n    source_video_id: ctx.source_video_id,\n    source_title: ctx.source_title,\n    source_channel: ctx.source_channel,\n    vizard_project_id: ctx.vizard_project_id,\n  }));\n\nif (clips.length === 0) throw new Error(`NO_CLIPS_RETURNED: project ${ctx.vizard_project_id} returned ${videos.length} videos, none usable`);\n\nconst withTranscript = clips.filter((c) => c.transcript.trim().length > 0).length;\nconsole.log(`clips=${clips.length} with_transcript=${withTranscript} polls=${ctx.polls}`);\n\nreturn clips.map((c) => ({ json: c }));"
+        "method": "POST",
+        "url": "http://host.docker.internal:8787/v1/complete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 900000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "retryOnFail": false,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "b9",
+      "name": "BUILD CANDIDATES",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Validates finder output and maps segment ids to the clip schema used by the judge.\nconst res = $input.first().json;\nconst ctx = $('BUILD FINDER REQUEST').first().json;\nconst prep = ctx.result;\nif (!res?.ok || !Array.isArray(res.json?.candidates)) {\n  throw new Error(`${res?.error_code ?? 'LLM_INVALID_JSON'}: clip finder ${res?.error_message ?? 'returned no candidates'}`);\n}\nconst byId = new Map(prep.segments.map((s) => [s.id, s]));\nconst used = [];\nconst clips = [];\nconst rejected = [];\nfor (const c of res.json.candidates) {\n  const a = byId.get(c.start_id);\n  const b = byId.get(c.end_id);\n  const why = (r) => rejected.push({ ...c, reject: r });\n  if (!a || !b || c.end_id < c.start_id) { why('invalid ids'); continue; }\n  const start = Math.max(0, a.start - 0.15);\n  const end = b.end + 0.35;\n  const duration = end - start;\n  if (duration < 15 || duration > 75) { why(`duration ${duration.toFixed(1)}s`); continue; }\n  if (c.speaker_confidence < 60) { why(`speaker_confidence ${c.speaker_confidence}`); continue; }\n  if (used.some(([s, e]) => start < e && end > s)) { why('overlap'); continue; }\n  used.push([start, end]);\n  const text = prep.segments.filter((s) => s.id >= c.start_id && s.id <= c.end_id).map((s) => s.text).join(' ');\n  clips.push({\n    clip_id: `${prep.video_id}_${c.start_id}-${c.end_id}`,\n    start: Number(start.toFixed(2)), end: Number(end.toFixed(2)),\n    duration: Math.round(duration),\n    title: c.title_hint, transcript: text,\n    viral_score: c.score, viral_reason: c.why, speaker_confidence: c.speaker_confidence,\n    related_topic: '',\n    source_url: prep.source_url, source_video_id: prep.video_id,\n    source_title: prep.title, source_channel: prep.channel,\n  });\n}\nconsole.log(JSON.stringify({ proposed: res.json.candidates.length, accepted: clips.length, rejected }));\nif (clips.length === 0) throw new Error(`NO_CLIPS_RETURNED: finder proposed ${res.json.candidates.length}, none valid`);\nreturn clips.map((c) => ({ json: c }));"
       }
     },
     {
@@ -226,7 +243,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2200,
+        2420,
         200
       ],
       "parameters": {
@@ -239,7 +256,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2420,
+        2640,
         200
       ],
       "parameters": {
@@ -279,7 +296,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2640,
+        2860,
         200
       ],
       "parameters": {
@@ -292,11 +309,167 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2860,
+        3080,
         200
       ],
       "parameters": {
         "jsCode": "// SCORING_V1 (docs/plan.md §23): score >= 75 AND risk != HIGH, score DESC, LIMIT 1.\nconst MIN_SCORE = 75;\nconst all = $input.all().map((i) => i.json);\nconst judged = all.filter((c) => c.judge_ok);\n\nif (judged.length === 0) {\n  throw new Error(`LLM_INVALID_JSON: no clip could be judged (${all.map((c) => c.judge_error).join(' | ')})`);\n}\n\nconst ranked = [...judged].sort((a, b) => b.score - a.score || b.viral_score - a.viral_score);\nconst eligible = ranked.filter((c) => c.score >= MIN_SCORE && c.risk !== 'HIGH');\n\nconst summary = ranked.map((c) => ({\n  clip_id: c.clip_id, score: c.score, risk: c.risk, eligible: eligible.includes(c), title: c.title,\n}));\nconsole.log(JSON.stringify({ judged: judged.length, failed: all.length - judged.length, ranking: summary }));\n\nif (eligible.length === 0) {\n  const config = $('CONFIG').first().json;\n  const fallback = ranked.find((c) => c.risk !== 'HIGH');\n  if (config.pilot && config.allow_below_threshold && fallback) {\n    return [{ json: { ...fallback, status: 'REVIEW', below_threshold: true, scoring_version: 'SCORING_V1', ranking: summary } }];\n  }\n  throw new Error(`ALL_CLIPS_REJECTED: best score ${ranked[0].score} (${ranked[0].risk}), threshold ${MIN_SCORE}`);\n}\n\nreturn [{ json: { ...eligible[0], status: 'SELECTED', below_threshold: false, scoring_version: 'SCORING_V1', ranking: summary } }];"
+      }
+    },
+    {
+      "id": "c1",
+      "name": "CLIPPER RENDER",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3300,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8788/v1/render",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ video_id: $json.source_video_id, clip_id: $json.clip_id, start: $json.start, end: $json.end }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "c2",
+      "name": "CHECK RENDER SUBMIT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nif (!res?.job_id) throw new Error(`RENDER_SUBMIT_FAILED: ${JSON.stringify(res).slice(0, 300)}`);\nreturn [{ json: { ...$('RANK & SELECT').first().json, job_id: res.job_id } }];"
+      }
+    },
+    {
+      "id": "c3",
+      "name": "WAIT RENDER",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3740,
+        200
+      ],
+      "webhookId": "pavanatto-c3",
+      "parameters": {
+        "amount": 20
+      }
+    },
+    {
+      "id": "c4",
+      "name": "RENDER STATUS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3960,
+        200
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://host.docker.internal:8788/v1/jobs/{{ $json.job_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "c5",
+      "name": "CHECK RENDER",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Polls a clipper job; loops back to WAIT RENDER while queued/running.\nconst MAX_POLLS = 60;\nconst res = $input.first().json;\nconst ctx = $('WAIT RENDER').first().json;\nconst poll = $runIndex + 1;\n\nif (res?.status === 'queued' || res?.status === 'running') {\n  if (poll >= MAX_POLLS) throw new Error(`RENDER_TIMEOUT: job ${ctx.job_id} still ${res.status} after ${poll} polls`);\n  return [{ json: { ...ctx, job_status: res.status, polls: poll } }];\n}\nif (res?.status === 'done' && res.result) {\n  return [{ json: { ...ctx, job_status: 'done', polls: poll, result: res.result } }];\n}\nthrow new Error(`${res?.error_code ?? 'RENDER_FAILED'}: ${res?.error_message ?? JSON.stringify(res).slice(0, 300)}`);"
+      }
+    },
+    {
+      "id": "c6",
+      "name": "Rendered?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4400,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cc6",
+              "leftValue": "={{ $json.job_status }}",
+              "rightValue": "done",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c7",
+      "name": "DONE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nconst { result, job_id, job_status, polls, ...clip } = ctx;\nif (result.width !== 1080 || result.height !== 1920) throw new Error(`RENDER_FAILED: unexpected size ${result.width}x${result.height}`);\nreturn [{ json: { ...clip, status: clip.status, video_file: result.container_path, video_file_name: result.file_name,\n  render: { width: result.width, height: result.height, duration: result.duration, shots: result.shots, fit_ratio: result.fit_ratio } } }];"
       }
     }
   ],
@@ -316,105 +489,109 @@
       "main": [
         [
           {
-            "node": "Has Project?",
+            "node": "CLIPPER PREPARE",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Has Project?": {
+    "CLIPPER PREPARE": {
       "main": [
         [
           {
-            "node": "WAIT",
+            "node": "CHECK PREPARE SUBMIT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECK PREPARE SUBMIT": {
+      "main": [
+        [
+          {
+            "node": "WAIT PREPARE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WAIT PREPARE": {
+      "main": [
+        [
+          {
+            "node": "PREPARE STATUS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PREPARE STATUS": {
+      "main": [
+        [
+          {
+            "node": "CHECK PREPARE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECK PREPARE": {
+      "main": [
+        [
+          {
+            "node": "Prepared?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepared?": {
+      "main": [
+        [
+          {
+            "node": "BUILD FINDER REQUEST",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "VIZARD CREATE",
+            "node": "WAIT PREPARE",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "VIZARD CREATE": {
+    "BUILD FINDER REQUEST": {
       "main": [
         [
           {
-            "node": "CHECK CREATE",
+            "node": "AI CLIP FINDER",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "CHECK CREATE": {
+    "AI CLIP FINDER": {
       "main": [
         [
           {
-            "node": "WAIT",
+            "node": "BUILD CANDIDATES",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "WAIT": {
-      "main": [
-        [
-          {
-            "node": "VIZARD QUERY",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "VIZARD QUERY": {
-      "main": [
-        [
-          {
-            "node": "CHECK STATUS",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "CHECK STATUS": {
-      "main": [
-        [
-          {
-            "node": "Complete?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Complete?": {
-      "main": [
-        [
-          {
-            "node": "NORMALIZE CLIPS",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "WAIT",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "NORMALIZE CLIPS": {
+    "BUILD CANDIDATES": {
       "main": [
         [
           {
@@ -452,6 +629,90 @@
         [
           {
             "node": "RANK & SELECT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RANK & SELECT": {
+      "main": [
+        [
+          {
+            "node": "CLIPPER RENDER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CLIPPER RENDER": {
+      "main": [
+        [
+          {
+            "node": "CHECK RENDER SUBMIT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECK RENDER SUBMIT": {
+      "main": [
+        [
+          {
+            "node": "WAIT RENDER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WAIT RENDER": {
+      "main": [
+        [
+          {
+            "node": "RENDER STATUS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RENDER STATUS": {
+      "main": [
+        [
+          {
+            "node": "CHECK RENDER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECK RENDER": {
+      "main": [
+        [
+          {
+            "node": "Rendered?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rendered?": {
+      "main": [
+        [
+          {
+            "node": "DONE",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "WAIT RENDER",
             "type": "main",
             "index": 0
           }

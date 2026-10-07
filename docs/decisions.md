@@ -3,7 +3,7 @@
 ## D1 — LLM via assinaturas (Claude Code / Codex CLI), sem API keys
 Ver `docs/llm-bridge.md`. Consumo entra no limite das assinaturas; fallback automático Claude → Codex.
 
-## D2 — Substituir o Vizard por um clipper local (proposta, 2026-10-07)
+## D2 — Substituir o Vizard por um clipper local (implementado, 2026-10-07)
 
 **Problema (Vizard no plano Free):** marca d'água, vinheta/propaganda no final, export em 720p,
 limite de 1 req/min · 10/h e só ~4 candidatos para um vídeo de 9 min. Remover marca d'água
@@ -29,3 +29,10 @@ URL → yt-dlp (vídeo 1080p + áudio)
   (github.com/artbyjazi/autoclip), OpenShorts (github.com/mutonby/openshorts).
 - O Editorial Judge e o resto do workflow não mudam: o clipper entrega o mesmo clip schema.
 - Risco: download via yt-dlp depende do YouTube não bloquear; manter Vizard pago como plano B.
+
+**Validação (Folha, Sn3H5UzsDoY, 45 min):** prepare 5 min (download + transcrição), finder
+10 propostas → 9 válidas, judge marcou 2 como HIGH risk, melhor = 75 (SELECTED), render
+1080×1920 de 48s em 50s. Legendas e reframe conferidos visualmente.
+
+Limitações conhecidas: tarja/letreiro da emissora (lower third) aparece no corte; não há
+diarização (o finder infere o falante pelo contexto, o reframe usa movimento da boca).

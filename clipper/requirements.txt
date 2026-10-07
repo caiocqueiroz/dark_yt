@@ -1,0 +1,6 @@
+mlx-whisper
+mediapipe
+opencv-python-headless
+numpy
+pillow
+scenedetect
