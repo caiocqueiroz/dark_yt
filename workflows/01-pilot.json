@@ -1,10 +1,11 @@
 {
   "id": "pavanattoPilot01",
   "name": "PAVANATO - 01 - PILOT",
-  "active": false,
+  "active": true,
   "settings": {
     "executionOrder": "v1",
-    "timezone": "America/Sao_Paulo"
+    "timezone": "America/Sao_Paulo",
+    "errorWorkflow": "pavanatoErrors99"
   },
   "nodes": [
     {
@@ -28,7 +29,7 @@
         300
       ],
       "parameters": {
-        "jsCode": "// Edit these values for each manual run.\nconst config = {\n  source_url: 'https://www.youtube.com/watch?v=Sn3H5UzsDoY',\n  pilot: true,\n  force_reprocess: false,\n  // Pilot only: if no clip reaches SCORING_V1, continue with the best non-HIGH clip as REVIEW.\n  allow_below_threshold: true,\n  max_candidates: 10,\n};\n\nconst m = config.source_url.match(/(?:v=|youtu\\.be\\/|shorts\\/|live\\/)([A-Za-z0-9_-]{11})/);\nif (!m) throw new Error('CONFIG_INVALID: could not extract YouTube video id from source_url');\n\nreturn [{ json: { ...config, source_video_id: m[1], started_at: new Date().toISOString() } }];"
+        "jsCode": "// Edit these values for each manual run.\nconst config = {\n  source_url: 'https://www.youtube.com/watch?v=Sn3H5UzsDoY',\n  pilot: true,\n  force_reprocess: false,\n  // Pilot only: if no clip reaches SCORING_V1, continue with the best non-HIGH clip as REVIEW.\n  allow_below_threshold: true,\n  max_candidates: 10,\n};\n\n// Webhook runs (scripts/run-pilot.sh) override the defaults above.\nlet body = {};\ntry { body = $('Webhook').first().json.body || {}; } catch { /* manual run */ }\nif (body.source_url) config.source_url = String(body.source_url);\nif (body.force_reprocess !== undefined) config.force_reprocess = body.force_reprocess === true || body.force_reprocess === 'true';\nif (body.allow_below_threshold !== undefined) config.allow_below_threshold = body.allow_below_threshold === true || body.allow_below_threshold === 'true';\n\nconst m = config.source_url.match(/(?:v=|youtu\\.be\\/|shorts\\/|live\\/)([A-Za-z0-9_-]{11})/);\nif (!m) throw new Error('CONFIG_INVALID: could not extract YouTube video id from source_url');\n\nreturn [{ json: { ...config, source_video_id: m[1], started_at: new Date().toISOString() } }];"
       }
     },
     {
@@ -531,6 +532,429 @@
       "parameters": {
         "jsCode": "// Applies proofreading fixes (only to sentences of this clip). Failures are logged, not fatal.\nconst res = $input.first().json;\nconst { request, ...clip } = $('BUILD PROOFREAD REQUEST').first().json;\nconst ids = new Set();\nfor (const p of clip.parts) for (let i = p.start_id; i <= p.end_id; i++) ids.add(i);\nconst fixes = {};\nconst changes = [];\nif (res?.ok && Array.isArray(res.json?.fixes)) {\n  for (const f of res.json.fixes) {\n    if (!ids.has(f.id) || !f.text?.trim()) continue;\n    fixes[String(f.id)] = f.text.trim();\n    changes.push(...(f.changes || []).map((c) => `[${f.id}] ${c}`));\n  }\n} else {\n  console.log(`PROOFREAD_SKIPPED: ${res?.error_code ?? 'no response'} ${res?.error_message ?? ''}`);\n}\nconsole.log(JSON.stringify({ proofread_changes: changes }));\nreturn [{ json: { ...clip, sentence_fixes: fixes, proofread_changes: changes } }];"
       }
+    },
+    {
+      "id": "e1",
+      "name": "ENSURE TABLE",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        500
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "processed_videos",
+        "columns": {
+          "column": [
+            {
+              "name": "youtube_id",
+              "type": "string"
+            },
+            {
+              "name": "source_url",
+              "type": "string"
+            },
+            {
+              "name": "source_channel",
+              "type": "string"
+            },
+            {
+              "name": "source_title",
+              "type": "string"
+            },
+            {
+              "name": "published_at",
+              "type": "string"
+            },
+            {
+              "name": "discovered_at",
+              "type": "date"
+            },
+            {
+              "name": "execution_id",
+              "type": "string"
+            },
+            {
+              "name": "best_clip_id",
+              "type": "string"
+            },
+            {
+              "name": "editorial_score",
+              "type": "number"
+            },
+            {
+              "name": "editorial_risk",
+              "type": "string"
+            },
+            {
+              "name": "below_threshold",
+              "type": "boolean"
+            },
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "video_file",
+              "type": "string"
+            },
+            {
+              "name": "youtube_output_id",
+              "type": "string"
+            },
+            {
+              "name": "status",
+              "type": "string"
+            },
+            {
+              "name": "error_reason",
+              "type": "string"
+            },
+            {
+              "name": "created_at",
+              "type": "date"
+            },
+            {
+              "name": "updated_at",
+              "type": "date"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": true
+        }
+      }
+    },
+    {
+      "id": "e2",
+      "name": "LOOKUP VIDEO",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        500
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "processed_videos"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "youtube_id",
+              "condition": "eq",
+              "keyValue": "={{ $('CONFIG').first().json.source_video_id }}"
+            }
+          ]
+        },
+        "returnAll": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "e3",
+      "name": "IDEMPOTENCY",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        500
+      ],
+      "parameters": {
+        "jsCode": "// Idempotency (docs/plan.md §31): skip videos already in flight or published, unless forced.\nconst config = $('CONFIG').first().json;\nconst row = $input.all().map((i) => i.json).find((r) => r.youtube_id === config.source_video_id);\nconst STALE_MS = 2 * 60 * 60 * 1000; // a PROCESSING row older than this is a crashed run\nconst now = new Date();\nif (row && !config.force_reprocess) {\n  const active = ['PROCESSING', 'CLIPPED', 'SELECTED'].includes(row.status);\n  const stale = active && now - new Date(row.updated_at) > STALE_MS;\n  if (row.status === 'UPLOADED' || (active && !stale)) {\n    console.log(`SKIPPED_DUPLICATE: ${config.source_video_id} is ${row.status} (youtube_output_id=${row.youtube_output_id || '-'})`);\n    return [];\n  }\n}\nreturn [{ json: {\n  youtube_id: config.source_video_id,\n  source_url: config.source_url,\n  execution_id: String($execution.id),\n  status: 'PROCESSING',\n  error_reason: '',\n  discovered_at: row?.discovered_at ?? now.toISOString(),\n  created_at: row?.created_at ?? now.toISOString(),\n  updated_at: now.toISOString(),\n} }];"
+      }
+    },
+    {
+      "id": "e4",
+      "name": "MARK PROCESSING",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        500
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "processed_videos"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "youtube_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.youtube_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f1",
+      "name": "BUILD METADATA REQUEST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4840,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Title + description (docs/plan.md §24-25) in a single call.\nconst clip = $input.first().json;\nconst SYSTEM = `Você é editor de YouTube Shorts de um canal independente (canal de fã, não oficial)\ncom declarações públicas de Lucas Pavanato. Grafia correta do nome: Pavanato (um T).\n\nTÍTULO\n- Alta retenção, despertando curiosidade SEM inventar fatos e sem alterar o significado da fala.\n- Prefira: curiosidade, contraste, resposta, surpresa, conflito real, assunto atual, afirmação\n  forte realmente existente no vídeo.\n- Evite: clickbait falso, caixa alta excessiva, afirmações não presentes, insultos, inferências\n  sobre intenção, propaganda política personalizada.\n- Máximo 70 caracteres. Sem hashtags no título. Crie 5 opções e escolha a melhor.\n\nDESCRIÇÃO\n- Máximo 350 caracteres. NÃO inclua URL, linha de fonte, aviso de canal de fã nem hashtags:\n  isso é adicionado automaticamente depois.\n- Explique brevemente o contexto, deixe claro que é um trecho, identifique a fonte original,\n  não atribua nada que não tenha sido dito, tom editorial.\n\nTAGS: 5 a 8 tags curtas em português (sem #).\nHASHTAGS: 3 a 5, sem espaços, começando com #; não inclua #LucasPavanato nem #Shorts (já entram).`;\n\nconst schema = {\n  type: 'object', additionalProperties: false,\n  required: ['title', 'alternatives', 'hook', 'description', 'tags', 'hashtags'],\n  properties: {\n    title: { type: 'string' }, alternatives: { type: 'array', items: { type: 'string' } },\n    hook: { type: 'string' }, description: { type: 'string' },\n    tags: { type: 'array', items: { type: 'string' } }, hashtags: { type: 'array', items: { type: 'string' } },\n  },\n};\nreturn [{ json: { ...clip, request: { provider: 'auto', system: SYSTEM, schema, prompt:\n`FONTE: ${clip.source_channel} — \"${clip.source_title}\"\nURL: ${clip.source_url}\n\nCONTEXTO: ${clip.context_text || '-'}\nPERGUNTA INCLUÍDA: ${clip.question || '-'}\nASSUNTO: ${clip.main_topic}\n\nTRANSCRIÇÃO DA RESPOSTA:\n${clip.transcript}` } } }];"
+      }
+    },
+    {
+      "id": "f1b",
+      "name": "AI METADATA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5060,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8787/v1/complete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 600000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      }
+    },
+    {
+      "id": "f2",
+      "name": "VALIDATE METADATA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5280,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Validates metadata and appends the mandatory source/notice lines (never left to the LLM).\nconst res = $input.first().json;\nconst { request, ...clip } = $('BUILD METADATA REQUEST').first().json;\nif (!res?.ok || !res.json?.title) throw new Error(`${res?.error_code ?? 'LLM_INVALID_JSON'}: metadata ${res?.error_message ?? 'missing title'}`);\nconst m = res.json;\n\nconst clean = (s) => String(s || '').replace(/[<>]/g, '').replace(/\\s+/g, ' ').trim();\nlet title = clean(m.title).replace(/#\\S+/g, '').trim();\nif (!title) throw new Error('LLM_INVALID_JSON: empty title');\nif (title.length > 100) title = title.slice(0, 97).replace(/\\s+\\S*$/, '') + '...';\nif (/pavanatto/i.test(title + m.description)) throw new Error('METADATA_INVALID: misspelled name (Pavanatto)');\n\nconst tag = (h) => '#' + String(h).replace(/^#/, '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9_]/g, '');\nconst hashtags = [...new Set(['#LucasPavanato', ...(m.hashtags || []).map(tag), '#Shorts'])].filter((h) => h.length > 2).slice(0, 6);\nlet body = clean(m.description);\nif (body.length > 400) body = body.slice(0, 397).replace(/\\s+\\S*$/, '') + '...';\nconst description = [\n  body,\n  '',\n  `Fonte: ${clip.source_channel} — ${clip.source_url}`,\n  'Trecho editado. Canal de fã, independente e não oficial; não representa Lucas Pavanato nem sua equipe.',\n  '',\n  hashtags.join(' '),\n].join('\\n');\nconst tags = [...new Set(['Lucas Pavanato', 'Pavanato', ...(m.tags || []).map(clean)])].filter(Boolean).slice(0, 12);\n\nreturn [{ json: { ...clip, title, title_alternatives: m.alternatives, hook: m.hook, description, tags } }];"
+      }
+    },
+    {
+      "id": "f2b",
+      "name": "SELECTED ROW",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5390,
+        250
+      ],
+      "parameters": {
+        "jsCode": "const c = $input.first().json;\nreturn [{ json: {\n  youtube_id: c.source_video_id, source_channel: c.source_channel, source_title: c.source_title,\n  best_clip_id: c.clip_id, editorial_score: c.score, editorial_risk: c.risk, below_threshold: !!c.below_threshold,\n  title: c.title, video_file: c.video_file, status: 'SELECTED', updated_at: new Date().toISOString(),\n} }];"
+      }
+    },
+    {
+      "id": "f2c",
+      "name": "MARK SELECTED",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        5500,
+        250
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "processed_videos"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "youtube_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.youtube_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f3",
+      "name": "READ MP4",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        5720,
+        100
+      ],
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ $('VALIDATE METADATA').first().json.video_file }}",
+        "options": {
+          "dataPropertyName": "video"
+        }
+      }
+    },
+    {
+      "id": "f4",
+      "name": "YOUTUBE UPLOAD PRIVATE",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        5940,
+        100
+      ],
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{ $('VALIDATE METADATA').first().json.title }}",
+        "regionCode": "BR",
+        "categoryId": "25",
+        "binaryProperty": "video",
+        "options": {
+          "description": "={{ $('VALIDATE METADATA').first().json.description }}",
+          "privacyStatus": "private",
+          "tags": "={{ $('VALIDATE METADATA').first().json.tags.join(',') }}",
+          "defaultLanguage": "pt",
+          "selfDeclaredMadeForKids": false,
+          "notifySubscribers": false,
+          "embeddable": true
+        }
+      },
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "youtubeOAuth00001",
+          "name": "YouTube (canal Pavanato Agora)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 10000
+    },
+    {
+      "id": "f5",
+      "name": "CHECK UPLOAD",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6160,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst meta = $('VALIDATE METADATA').first().json;\nconst id = res?.id ?? res?.uploadId;\nif (!id) throw new Error(`YOUTUBE_UPLOAD_FAILED: ${JSON.stringify(res).slice(0, 300)}`);\nconsole.log(`UPLOADED https://youtu.be/${id}`);\nreturn [{ json: {\n  youtube_id: meta.source_video_id, youtube_output_id: id, status: 'UPLOADED', error_reason: '',\n  updated_at: new Date().toISOString(),\n} }];"
+      }
+    },
+    {
+      "id": "f6",
+      "name": "MARK UPLOADED",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        6380,
+        100
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "processed_videos"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "youtube_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.youtube_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f7",
+      "name": "RESULT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6600,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const meta = $('VALIDATE METADATA').first().json;\nconst up = $input.first().json;\nreturn [{ json: {\n  status: 'UPLOADED', youtube_url: `https://youtu.be/${up.youtube_output_id}`, studio_url: `https://studio.youtube.com/video/${up.youtube_output_id}/edit`,\n  title: meta.title, description: meta.description, tags: meta.tags, title_alternatives: meta.title_alternatives,\n  clip_id: meta.clip_id, score: meta.score, risk: meta.risk, below_threshold: !!meta.below_threshold,\n  video_file: meta.video_file, source_url: meta.source_url,\n} }];"
+      }
+    },
+    {
+      "id": "w0",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        500
+      ],
+      "webhookId": "6f1d2c1e-7a55-4c55-9f3e-pavanato01",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pavanato-pilot",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      }
     }
   ],
   "connections": {
@@ -549,7 +973,7 @@
       "main": [
         [
           {
-            "node": "CLIPPER PREPARE",
+            "node": "ENSURE TABLE",
             "type": "main",
             "index": 0
           }
@@ -806,6 +1230,171 @@
         [
           {
             "node": "CLIPPER RENDER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ENSURE TABLE": {
+      "main": [
+        [
+          {
+            "node": "LOOKUP VIDEO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOOKUP VIDEO": {
+      "main": [
+        [
+          {
+            "node": "IDEMPOTENCY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IDEMPOTENCY": {
+      "main": [
+        [
+          {
+            "node": "MARK PROCESSING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MARK PROCESSING": {
+      "main": [
+        [
+          {
+            "node": "CLIPPER PREPARE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DONE": {
+      "main": [
+        [
+          {
+            "node": "BUILD METADATA REQUEST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUILD METADATA REQUEST": {
+      "main": [
+        [
+          {
+            "node": "AI METADATA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI METADATA": {
+      "main": [
+        [
+          {
+            "node": "VALIDATE METADATA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VALIDATE METADATA": {
+      "main": [
+        [
+          {
+            "node": "SELECTED ROW",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SELECTED ROW": {
+      "main": [
+        [
+          {
+            "node": "MARK SELECTED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MARK SELECTED": {
+      "main": [
+        [
+          {
+            "node": "READ MP4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "READ MP4": {
+      "main": [
+        [
+          {
+            "node": "YOUTUBE UPLOAD PRIVATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YOUTUBE UPLOAD PRIVATE": {
+      "main": [
+        [
+          {
+            "node": "CHECK UPLOAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECK UPLOAD": {
+      "main": [
+        [
+          {
+            "node": "MARK UPLOADED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MARK UPLOADED": {
+      "main": [
+        [
+          {
+            "node": "RESULT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
             "type": "main",
             "index": 0
           }

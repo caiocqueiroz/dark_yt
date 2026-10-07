@@ -21,10 +21,17 @@ Fonte de verdade: `workflows/*.json` no repo. Importar/atualizar no n8n:
 docker cp workflows/01-pilot.json pavanatto-n8n:/tmp/wf.json
 docker exec pavanatto-n8n n8n import:workflow --input=/tmp/wf.json
 ```
-Executar pela CLI (porta do task broker precisa ser outra, a 5679 é do n8n principal):
+Rodar o piloto (webhook autenticado no n8n principal; `n8n execute` pela CLI NÃO carrega o
+módulo de Data Tables):
 ```bash
-docker exec -e N8N_RUNNERS_BROKER_PORT=5690 pavanatto-n8n n8n execute --id=pavanattoPilot01 --rawOutput
+scripts/run-pilot.sh 'https://www.youtube.com/watch?v=XXXX'          # respeita idempotência
+scripts/run-pilot.sh 'https://www.youtube.com/watch?v=XXXX' --force  # reprocessa
+scripts/show-execution.py last                                       # acompanhar
 ```
+Depois de importar workflow: `n8n update:workflow --id=pavanattoPilot01 --active=true` + restart.
+
+Persistência (Data Tables): `processed_videos` (status por vídeo: PROCESSING → SELECTED →
+UPLOADED | ERROR com `error_reason`) e `execution_errors` (gravada pelo `PAVANATO - 99 - ERRORS`).
 `PAVANATO - 01 - PILOT`: no node CONFIG, `vizard_project_id` reaproveita um projeto Vizard
 já processado (não gasta minutos). Deixe vazio para processar uma URL nova.
 Links de MP4 do Vizard expiram em 7 dias; rodar de novo gera links novos.

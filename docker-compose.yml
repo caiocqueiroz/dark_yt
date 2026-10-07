@@ -16,6 +16,7 @@ services:
       - N8N_DIAGNOSTICS_ENABLED=false
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
       - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
+      - N8N_RESTRICT_FILE_ACCESS_TO=/files
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=336
     volumes:

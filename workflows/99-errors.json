@@ -1,0 +1,268 @@
+{
+  "id": "pavanatoErrors99",
+  "name": "PAVANATO - 99 - ERRORS",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "x1",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "x2",
+      "name": "FORMAT ERROR",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Normalizes the failed execution into the error log row (docs/plan.md §32). Never logs secrets.\nconst e = $input.first().json;\nconst msg = String(e.execution?.error?.message ?? 'unknown error');\nconst step = e.execution?.lastNodeExecuted ?? '';\nlet code = (msg.match(/^([A-Z][A-Z0-9_]{3,}):/) || [])[1];\nif (!code && /YOUTUBE/.test(step)) code = /token|auth|credential|401|403|invalid_grant/i.test(msg) ? 'YOUTUBE_AUTH_FAILED' : 'YOUTUBE_UPLOAD_FAILED';\nif (!code && /READ MP4/.test(step)) code = 'VIDEO_DOWNLOAD_FAILED';\nif (!code && /dataTable|MARK|LOOKUP|ENSURE/i.test(step)) code = 'DATABASE_FAILED';\ncode = code ?? 'UNHANDLED';\nreturn [{ json: {\n  execution_id: String(e.execution?.id ?? ''),\n  workflow: e.workflow?.name ?? '',\n  step,\n  error_code: code,\n  error_message: msg.replace(/(Bearer|api[_-]?key|token|secret)[^\\s,]*\\s*[:=]?\\s*\\S+/gi, '$1 [redacted]').slice(0, 1000),\n  execution_url: e.execution?.url ?? '',\n  timestamp: new Date().toISOString(),\n} }];"
+      }
+    },
+    {
+      "id": "x3",
+      "name": "ENSURE ERRORS TABLE",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "execution_errors",
+        "columns": {
+          "column": [
+            {
+              "name": "execution_id",
+              "type": "string"
+            },
+            {
+              "name": "workflow",
+              "type": "string"
+            },
+            {
+              "name": "step",
+              "type": "string"
+            },
+            {
+              "name": "error_code",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "execution_url",
+              "type": "string"
+            },
+            {
+              "name": "timestamp",
+              "type": "date"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": true
+        }
+      }
+    },
+    {
+      "id": "x4",
+      "name": "INSERT ERROR",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "execution_errors"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "execution_id": "={{ $('FORMAT ERROR').first().json.execution_id }}",
+            "workflow": "={{ $('FORMAT ERROR').first().json.workflow }}",
+            "step": "={{ $('FORMAT ERROR').first().json.step }}",
+            "error_code": "={{ $('FORMAT ERROR').first().json.error_code }}",
+            "error_message": "={{ $('FORMAT ERROR').first().json.error_message }}",
+            "execution_url": "={{ $('FORMAT ERROR').first().json.execution_url }}",
+            "timestamp": "={{ $('FORMAT ERROR').first().json.timestamp }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "x5",
+      "name": "FIND VIDEO",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        300
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "processed_videos"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "execution_id",
+              "condition": "eq",
+              "keyValue": "={{ $('FORMAT ERROR').first().json.execution_id }}"
+            }
+          ]
+        },
+        "returnAll": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "x6",
+      "name": "ERROR ROW",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const err = $('FORMAT ERROR').first().json;\nconst rows = $input.all().map((i) => i.json).filter((r) => r.youtube_id);\nif (!rows.length) return [];\nreturn rows.map((r) => ({ json: {\n  youtube_id: r.youtube_id, status: 'ERROR',\n  error_reason: `${err.error_code} @ ${err.step}: ${err.error_message}`.slice(0, 500),\n  updated_at: new Date().toISOString(),\n} }));"
+      }
+    },
+    {
+      "id": "x7",
+      "name": "MARK ERROR",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "processed_videos"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "youtube_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.youtube_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "FORMAT ERROR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FORMAT ERROR": {
+      "main": [
+        [
+          {
+            "node": "ENSURE ERRORS TABLE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ENSURE ERRORS TABLE": {
+      "main": [
+        [
+          {
+            "node": "INSERT ERROR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "INSERT ERROR": {
+      "main": [
+        [
+          {
+            "node": "FIND VIDEO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FIND VIDEO": {
+      "main": [
+        [
+          {
+            "node": "ERROR ROW",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERROR ROW": {
+      "main": [
+        [
+          {
+            "node": "MARK ERROR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
