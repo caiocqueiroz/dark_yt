@@ -1,0 +1,27 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.42.4
+    container_name: pavanatto-n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+      - "${TAILSCALE_IP:-127.0.0.1}:5678:5678"
+    env_file: .env
+    environment:
+      - TZ=${TZ:-America/Sao_Paulo}
+      - GENERIC_TIMEZONE=${TZ:-America/Sao_Paulo}
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_SECURE_COOKIE=false
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
+      - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=336
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ${DOWNLOADS_DIR:-./downloads}:/files
+
+volumes:
+  n8n_data:
+    name: pavanatto_n8n_data

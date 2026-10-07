@@ -1,0 +1,13 @@
+.env
+*.env.local
+downloads/*
+backups/*
+logs/*
+!*/.gitkeep
+*.mp4
+*token*.json
+*credentials*.json
+cookies*.txt
+.DS_Store
+.orca/
+docs/plan.md
