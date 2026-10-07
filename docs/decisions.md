@@ -19,7 +19,7 @@ URL → yt-dlp (vídeo 1080p + áudio)
     → mlx-whisper (Metal, transcrição PT-BR com timestamp por palavra)
     → Editorial Judge escolhe trechos direto da transcrição (já existe)
     → FFmpeg: corte + reframe 9:16 com tracking de rosto (MediaPipe)
-    → legendas ASS (palavra destacada, máx. 2 linhas) + identidade PAVANATTO AGORA
+    → legendas ASS (palavra destacada, máx. 2 linhas) + identidade PAVANATO AGORA
     → MP4 1080×1920 sem marca d'água
 ```
 
@@ -36,3 +36,21 @@ URL → yt-dlp (vídeo 1080p + áudio)
 
 Limitações conhecidas: tarja/letreiro da emissora (lower third) aparece no corte; não há
 diarização (o finder infere o falante pelo contexto, o reframe usa movimento da boca).
+
+## D3 — Ajustes editoriais do clipper (2026-10-07)
+
+- **Qualidade:** fonte = maior bitrate até 1080p (VP9 "Premium" ~4,7 Mbps quando existir, vídeo
+  baixado em paralelo à transcrição); reframe com Lanczos + nitidez leve; libx264 CRF 17.
+- **Início/fim consistentes:** o finder trabalha com FRASES (montadas dos timestamps por
+  palavra; frases > 8s quebradas na maior pausa), com a duração de cada frase visível. Bordas
+  com folga no silêncio + fade de áudio. Quando a transcrição junta falas de pessoas diferentes,
+  o finder informa as palavras a cortar (`start_trim_text`/`end_trim_text`).
+- **Contexto:** pergunta do entrevistador incluída (rótulo PERGUNTA) quando curta e próxima;
+  senão card CONTEXTO nos primeiros 6s. Judge penaliza contexto infiel e final abrupto.
+- **Legendas revisadas:** LLM corrige só erros evidentes de ASR (nomes, números, datas), com
+  alinhamento palavra a palavra nos tempos originais.
+- **Faixa da emissora:** letreiro fixo detectado automaticamente (linhas que não mudam entre
+  câmeras) + 5,5% acima para tarjas de nome; coberto por banner do canal com
+  "CANAL FÃ • NÃO OFICIAL • FONTE: <canal>". Com banner, a marca do topo sai.
+- **Nome:** a grafia correta é **Pavanato** (um T). Identificadores técnicos antigos
+  (`pavanatto-n8n`, `com.pavanatto.*`, `pavanatto-cuts`) foram mantidos para não quebrar a infra.

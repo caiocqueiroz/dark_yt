@@ -1,6 +1,6 @@
 {
   "id": "pavanattoPilot01",
-  "name": "PAVANATTO - 01 - PILOT",
+  "name": "PAVANATO - 01 - PILOT",
   "active": false,
   "settings": {
     "executionOrder": "v1",
@@ -184,7 +184,7 @@
         200
       ],
       "parameters": {
-        "jsCode": "// Asks the LLM to propose clip windows directly from the full transcript.\nconst ctx = $input.first().json;\nconst prep = ctx.result;\nconst config = $('CONFIG').first().json;\nif (!prep.segments?.length) throw new Error('TRANSCRIPT_EMPTY: no segments');\n\nconst mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;\nconst lines = prep.segments.map((s) => `[${s.id}] (${mmss(s.start)}) ${s.text}`).join('\\n');\n\nconst SYSTEM = `Você é editor de um canal independente de YouTube Shorts com declarações públicas\nde Lucas Pavanato. Você recebe a transcrição completa de um vídeo, segmentada e numerada.\n\nTAREFA\nProponha até ${config.max_candidates} trechos candidatos a Shorts.\n\nREGRAS\n- Somente trechos em que LUCAS PAVANATO é quem fala (identifique pelo contexto: apresentação\n  do entrevistador, perguntas dirigidas a ele, referências à própria trajetória). Se houver\n  outros entrevistados, NÃO selecione falas deles como conteúdo principal.\n- Duração entre 20 e 60 segundos (use os tempos mm:ss como referência).\n- Comece no início de uma frase completa, idealmente já no ponto mais forte (hook nos\n  primeiros 2–3 segundos). Evite começar com \"então\", \"e aí\", \"como eu falei\".\n- Termine numa conclusão natural, sem cortar a frase.\n- O trecho deve ser compreensível sozinho e NÃO pode alterar o sentido da fala.\n- Prefira: resposta forte, contraste, conflito real, dado concreto, posição clara, tema atual.\n- Não avalie se concorda politicamente. Não selecione com base em ideologia.\n- Os trechos não devem se sobrepor.\n\nUse start_id e end_id = números dos segmentos [n] (inclusive).\nspeaker_confidence: 0–100, quão certo você está de que é Lucas Pavanato falando.\nscore: 0–10, potencial de retenção.`;\n\nconst schema = {\n  type: 'object', additionalProperties: false, required: ['candidates'],\n  properties: {\n    candidates: {\n      type: 'array',\n      items: {\n        type: 'object', additionalProperties: false,\n        required: ['start_id', 'end_id', 'speaker_confidence', 'score', 'title_hint', 'why'],\n        properties: {\n          start_id: { type: 'integer' }, end_id: { type: 'integer' },\n          speaker_confidence: { type: 'integer', minimum: 0, maximum: 100 },\n          score: { type: 'number', minimum: 0, maximum: 10 },\n          title_hint: { type: 'string' }, why: { type: 'string' },\n        },\n      },\n    },\n  },\n};\n\nreturn [{ json: { ...ctx, request: { provider: 'auto', system: SYSTEM, schema,\n  prompt: `VÍDEO: \"${prep.title}\" — canal ${prep.channel} (publicado ${prep.upload_date})\\n\\nTRANSCRIÇÃO:\\n${lines}` } } }];"
+        "jsCode": "// Asks the LLM to propose clip windows (full sentences) directly from the transcript.\nconst ctx = $input.first().json;\nconst prep = ctx.result;\nconst config = $('CONFIG').first().json;\nif (!prep.sentences?.length) throw new Error('TRANSCRIPT_EMPTY: no sentences');\n\nconst mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;\nconst lines = prep.sentences.map((s) => `[${s.id}] (${mmss(s.start)} · ${(s.end - s.start).toFixed(1)}s) ${s.text}`).join('\\n');\n\nconst SYSTEM = `Você é editor de um canal independente de YouTube Shorts com declarações públicas\nde Lucas Pavanato. Você recebe a transcrição completa de um vídeo, dividida em FRASES numeradas.\n\nTAREFA\nProponha até ${config.max_candidates} trechos candidatos a Shorts.\n\nREGRAS DO TRECHO (resposta)\n- Somente trechos em que LUCAS PAVANATO é quem fala (identifique pelo contexto: apresentação\n  do entrevistador, perguntas dirigidas a ele, referências à própria trajetória). Se houver\n  outros entrevistados, NÃO selecione falas deles como conteúdo principal.\n- start_id/end_id = números das frases [n] (inclusive). Cada linha mostra a duração da frase\n  (ex.: \"4.2s\"): SOME as durações e mantenha o total entre 20 e 60 segundos. Se a resposta\n  inteira for mais longa, escolha o MELHOR sub-trecho autossuficiente dela.\n- COMEÇO: na primeira frase da ideia, idealmente já no ponto mais forte. Evite começar com\n  \"então\", \"e aí\", \"como eu falei\", ou com resposta que dependa de algo não incluído.\n- FIM: a ideia precisa estar CONCLUÍDA. end_id deve ser a frase que fecha o raciocínio; nunca\n  termine no meio de uma enumeração, argumento ou frase interrompida.\n- Deve ser compreensível sozinho e NÃO pode alterar o sentido da fala.\n- Prefira: resposta forte, contraste, conflito real, dado concreto, posição clara, tema atual.\n- Não avalie se concorda politicamente. Não selecione com base em ideologia.\n- Trechos não podem se sobrepor.\n- A transcrição automática às vezes junta falas de pessoas diferentes numa mesma frase. Se a\n  frase start_id começa com palavras de OUTRA pessoa (ex.: o mediador anunciando a réplica),\n  copie essas palavras iniciais EXATAMENTE em start_trim_text; o corte começará depois delas.\n  Idem para end_trim_text: palavras finais da frase end_id que são de outra pessoa ou que\n  começam um raciocínio que não termina. Use \"\" quando não houver.\n\nCONTEXTO (para o espectador saber o que ele está respondendo)\n- Se a resposta é a uma PERGUNTA de um entrevistador (ou provocação de outro participante)\n  que aparece logo antes e dura até ~15 segundos, informe question_start_id/question_end_id\n  com as frases EXATAS da pergunta. Senão use -1 nos dois.\n- context_text: SEMPRE preencha. Uma frase factual (máx. 90 caracteres) dizendo o que está\n  sendo respondido/discutido, sem opinião, sem adjetivos, sem atribuir nada que não foi dito.\n  Ex.: \"Folha pergunta sobre críticas que ele já fez a Bolsonaro\".\n\nspeaker_confidence: 0–100, certeza de que a RESPOSTA é de Lucas Pavanato.\nscore: 0–10, potencial de retenção.`;\n\nconst schema = {\n  type: 'object', additionalProperties: false, required: ['candidates'],\n  properties: {\n    candidates: {\n      type: 'array',\n      items: {\n        type: 'object', additionalProperties: false,\n        required: ['start_id', 'end_id', 'start_trim_text', 'end_trim_text', 'question_start_id', 'question_end_id', 'context_text',\n          'speaker_confidence', 'score', 'title_hint', 'why'],\n        properties: {\n          start_id: { type: 'integer' }, end_id: { type: 'integer' },\n          start_trim_text: { type: 'string' }, end_trim_text: { type: 'string' },\n          question_start_id: { type: 'integer' }, question_end_id: { type: 'integer' },\n          context_text: { type: 'string' },\n          speaker_confidence: { type: 'integer', minimum: 0, maximum: 100 },\n          score: { type: 'number', minimum: 0, maximum: 10 },\n          title_hint: { type: 'string' }, why: { type: 'string' },\n        },\n      },\n    },\n  },\n};\n\nreturn [{ json: { ...ctx, request: { provider: 'auto', system: SYSTEM, schema,\n  prompt: `VÍDEO: \"${prep.title}\" — canal ${prep.channel} (publicado ${prep.upload_date})\\n\\nTRANSCRIÇÃO (frases):\\n${lines}` } } }];"
       }
     },
     {
@@ -234,7 +234,7 @@
         200
       ],
       "parameters": {
-        "jsCode": "// Validates finder output and maps segment ids to the clip schema used by the judge.\nconst res = $input.first().json;\nconst ctx = $('BUILD FINDER REQUEST').first().json;\nconst prep = ctx.result;\nif (!res?.ok || !Array.isArray(res.json?.candidates)) {\n  throw new Error(`${res?.error_code ?? 'LLM_INVALID_JSON'}: clip finder ${res?.error_message ?? 'returned no candidates'}`);\n}\nconst byId = new Map(prep.segments.map((s) => [s.id, s]));\nconst used = [];\nconst clips = [];\nconst rejected = [];\nfor (const c of res.json.candidates) {\n  const a = byId.get(c.start_id);\n  const b = byId.get(c.end_id);\n  const why = (r) => rejected.push({ ...c, reject: r });\n  if (!a || !b || c.end_id < c.start_id) { why('invalid ids'); continue; }\n  const start = Math.max(0, a.start - 0.15);\n  const end = b.end + 0.35;\n  const duration = end - start;\n  if (duration < 15 || duration > 75) { why(`duration ${duration.toFixed(1)}s`); continue; }\n  if (c.speaker_confidence < 60) { why(`speaker_confidence ${c.speaker_confidence}`); continue; }\n  if (used.some(([s, e]) => start < e && end > s)) { why('overlap'); continue; }\n  used.push([start, end]);\n  const text = prep.segments.filter((s) => s.id >= c.start_id && s.id <= c.end_id).map((s) => s.text).join(' ');\n  clips.push({\n    clip_id: `${prep.video_id}_${c.start_id}-${c.end_id}`,\n    start: Number(start.toFixed(2)), end: Number(end.toFixed(2)),\n    duration: Math.round(duration),\n    title: c.title_hint, transcript: text,\n    viral_score: c.score, viral_reason: c.why, speaker_confidence: c.speaker_confidence,\n    related_topic: '',\n    source_url: prep.source_url, source_video_id: prep.video_id,\n    source_title: prep.title, source_channel: prep.channel,\n  });\n}\nconsole.log(JSON.stringify({ proposed: res.json.candidates.length, accepted: clips.length, rejected }));\nif (clips.length === 0) throw new Error(`NO_CLIPS_RETURNED: finder proposed ${res.json.candidates.length}, none valid`);\nreturn clips.map((c) => ({ json: c }));"
+        "jsCode": "// Validates finder output and maps sentence ids to the clip schema used by the judge.\nconst res = $input.first().json;\nconst ctx = $('BUILD FINDER REQUEST').first().json;\nconst prep = ctx.result;\nif (!res?.ok || !Array.isArray(res.json?.candidates)) {\n  throw new Error(`${res?.error_code ?? 'LLM_INVALID_JSON'}: clip finder ${res?.error_message ?? 'returned no candidates'}`);\n}\nconst byId = new Map(prep.sentences.map((s) => [s.id, s]));\nconst norm = (t) => t.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-z0-9 ]/g, '').split(/\\s+/).filter(Boolean);\nconst textOf = (a, b) => prep.sentences.filter((s) => s.id >= a && s.id <= b).map((s) => s.text).join(' ');\n// Number of words to skip at the start/end of a sentence when trim text matches it exactly.\nconst skipCount = (sentence, trim, atEnd) => {\n  const t = norm(trim || '');\n  if (!t.length) return 0;\n  const words = sentence.text.split(/\\s+/).filter(Boolean);\n  const ws = norm(sentence.text);\n  const slice = atEnd ? ws.slice(ws.length - t.length) : ws.slice(0, t.length);\n  if (t.length >= ws.length || slice.join(' ') !== t.join(' ')) return 0;\n  // norm() can merge/drop tokens; fall back to raw word count of the matched prefix/suffix\n  return Math.min(t.length, words.length - 1);\n};\nconst used = [];\nconst clips = [];\nconst rejected = [];\nfor (const c of res.json.candidates) {\n  const why = (r) => rejected.push({ start_id: c.start_id, end_id: c.end_id, reject: r });\n  const a = byId.get(c.start_id);\n  const b = byId.get(c.end_id);\n  if (!a || !b || c.end_id < c.start_id) { why('invalid ids'); continue; }\n  const answerDur = b.end - a.start;\n  if (answerDur < 15 || answerDur > 75) { why(`answer ${answerDur.toFixed(1)}s`); continue; }\n  if (c.speaker_confidence < 60) { why(`speaker_confidence ${c.speaker_confidence}`); continue; }\n\n  const parts = [];\n  let question = null;\n  const qa = byId.get(c.question_start_id);\n  const qb = byId.get(c.question_end_id);\n  if (qa && qb && c.question_end_id >= c.question_start_id && c.question_end_id < c.start_id) {\n    const qDur = qb.end - qa.start;\n    if (qDur <= 18 && a.start - qb.end <= 30) {\n      parts.push({ start_id: c.question_start_id, end_id: c.question_end_id, role: 'question' });\n      question = textOf(c.question_start_id, c.question_end_id);\n    }\n  }\n  const skipStart = skipCount(a, c.start_trim_text, false);\n  const skipEnd = c.end_id === c.start_id && skipStart ? 0 : skipCount(b, c.end_trim_text, true);\n  parts.push({ start_id: c.start_id, end_id: c.end_id, role: 'answer', skip_words_start: skipStart, skip_words_end: skipEnd });\n  let answerText = textOf(c.start_id, c.end_id).split(/\\s+/);\n  answerText = answerText.slice(skipStart, answerText.length - skipEnd).join(' ');\n  const span = [parts[0].start_id, c.end_id].map((id) => byId.get(id));\n  const start = span[0].start;\n  const end = span[1].end;\n  if (used.some(([s, e]) => start < e && end > s)) { why('overlap'); continue; }\n  used.push([start, end]);\n\n  const duration = parts.reduce((t, p) => t + byId.get(p.end_id).end - byId.get(p.start_id).start, 0);\n  clips.push({\n    clip_id: `${prep.video_id}_${parts[0].start_id}-${c.end_id}`,\n    parts, duration: Math.round(duration),\n    question, context_text: (c.context_text || '').slice(0, 120),\n    title: c.title_hint, transcript: answerText, trims: { start: c.start_trim_text, end: c.end_trim_text, skipStart, skipEnd },\n    viral_score: c.score, viral_reason: c.why, speaker_confidence: c.speaker_confidence,\n    related_topic: '',\n    source_url: prep.source_url, source_video_id: prep.video_id,\n    source_title: prep.title, source_channel: prep.channel,\n  });\n}\nconsole.log(JSON.stringify({ proposed: res.json.candidates.length, accepted: clips.length, rejected }));\nif (clips.length === 0) throw new Error(`NO_CLIPS_RETURNED: finder proposed ${res.json.candidates.length}, none valid`);\nreturn clips.map((c) => ({ json: c }));"
       }
     },
     {
@@ -247,7 +247,7 @@
         200
       ],
       "parameters": {
-        "jsCode": "// Builds one Editorial Judge request per clip (prompt from docs/plan.md §22).\nconst SYSTEM = `Você é o editor-chefe de um canal independente de vídeos curtos\nsobre declarações públicas de Lucas Pavanatto.\n\nSua tarefa é avaliar candidatos de vídeos produzidos a partir de\nentrevistas, discursos e aparições públicas.\n\nOBJETIVO\n\nSelecionar trechos que tenham alto potencial de retenção em\nYouTube Shorts sem alterar o sentido da fala original.\n\nAvalie:\n\nHOOK — 0 a 25\nOs primeiros segundos despertam curiosidade?\n\nAUTOSSUFICIÊNCIA — 0 a 20\nO vídeo pode ser compreendido sozinho?\n\nCONFLITO/CONTRASTE — 0 a 15\nExiste resposta forte, discordância, contraponto, contraste ou\nafirmação que incentive continuidade?\n\nATUALIDADE — 0 a 15\nO tema possui relevância atual?\n\nCLAREZA — 0 a 10\nA fala é clara?\n\nRETENÇÃO — 0 a 15\nExiste progressão suficiente para incentivar o usuário a chegar ao fim?\n\nPENALIDADES (marque true quando se aplicar)\n\npenalty_meaning_change: o corte pode alterar o sentido original (-20).\npenalty_missing_context: depende fortemente de contexto ausente (-20).\npenalty_slow_start: começa lentamente (-15).\npenalty_repetitive: é repetitivo (-10).\npenalty_title_needs_exaggeration: um título interessante exigiria inventar ou exagerar o conteúdo (-20).\n\nIMPORTANTE\n\nNão avalie se você concorda politicamente com a declaração.\nNão produza propaganda personalizada para grupos ideológicos.\nAvalie interesse editorial, clareza, fidelidade e retenção.\nO TITLE abaixo foi gerado automaticamente pela ferramenta de corte e pode ser\nsensacionalista: avalie a FALA (transcrição), não esse título.\n\nResponda somente com o JSON pedido, em português.`;\n\nconst today = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\nconst schema = {\n  type: 'object',\n  additionalProperties: false,\n  required: ['hook_score','context_score','conflict_score','current_score','clarity_score','retention_score',\n    'penalty_meaning_change','penalty_missing_context','penalty_slow_start','penalty_repetitive',\n    'penalty_title_needs_exaggeration','risk','reason','suggested_hook','main_topic'],\n  properties: {\n    hook_score: { type: 'integer', minimum: 0, maximum: 25 },\n    context_score: { type: 'integer', minimum: 0, maximum: 20 },\n    conflict_score: { type: 'integer', minimum: 0, maximum: 15 },\n    current_score: { type: 'integer', minimum: 0, maximum: 15 },\n    clarity_score: { type: 'integer', minimum: 0, maximum: 10 },\n    retention_score: { type: 'integer', minimum: 0, maximum: 15 },\n    penalty_meaning_change: { type: 'boolean' },\n    penalty_missing_context: { type: 'boolean' },\n    penalty_slow_start: { type: 'boolean' },\n    penalty_repetitive: { type: 'boolean' },\n    penalty_title_needs_exaggeration: { type: 'boolean' },\n    risk: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },\n    reason: { type: 'string' },\n    suggested_hook: { type: 'string' },\n    main_topic: { type: 'string' },\n  },\n};\n\nreturn $input.all().map(({ json: clip }) => ({\n  json: {\n    ...clip,\n    request: {\n      provider: 'auto',\n      system: SYSTEM,\n      schema,\n      prompt: `DATA DE HOJE: ${today}\n\nFONTE: ${clip.source_channel} — \"${clip.source_title}\"\n\nINPUT\n\nTITLE:\n${clip.title}\n\nTRANSCRIPT:\n${clip.transcript}\n\nVIRAL SCORE (0-10, da ferramenta de corte):\n${clip.viral_score}\n\nVIRAL REASON:\n${clip.viral_reason}\n\nDURATION:\n${clip.duration}s`,\n    },\n  },\n}));"
+        "jsCode": "// Builds one Editorial Judge request per clip (prompt from docs/plan.md §22).\nconst SYSTEM = `Você é o editor-chefe de um canal independente de vídeos curtos\nsobre declarações públicas de Lucas Pavanato.\n\nSua tarefa é avaliar candidatos de vídeos produzidos a partir de\nentrevistas, discursos e aparições públicas.\n\nOBJETIVO\n\nSelecionar trechos que tenham alto potencial de retenção em\nYouTube Shorts sem alterar o sentido da fala original.\n\nAvalie:\n\nHOOK — 0 a 25\nOs primeiros segundos despertam curiosidade?\n\nAUTOSSUFICIÊNCIA — 0 a 20\nO vídeo pode ser compreendido sozinho?\n\nCONFLITO/CONTRASTE — 0 a 15\nExiste resposta forte, discordância, contraponto, contraste ou\nafirmação que incentive continuidade?\n\nATUALIDADE — 0 a 15\nO tema possui relevância atual?\n\nCLAREZA — 0 a 10\nA fala é clara?\n\nRETENÇÃO — 0 a 15\nExiste progressão suficiente para incentivar o usuário a chegar ao fim?\n\nPENALIDADES (marque true quando se aplicar)\n\npenalty_meaning_change: o corte pode alterar o sentido original (-20).\npenalty_missing_context: depende fortemente de contexto ausente (-20).\npenalty_slow_start: começa lentamente (-15).\npenalty_repetitive: é repetitivo (-10).\npenalty_title_needs_exaggeration: um título interessante exigiria inventar ou exagerar o conteúdo (-20).\npenalty_abrupt_end: termina no meio de uma frase ou antes de concluir a ideia (-15).\npenalty_unfaithful_context: o CONTEXTO EXIBIDO ou a PERGUNTA não correspondem ao que é respondido (-20).\n\nIMPORTANTE\n\nNão avalie se você concorda politicamente com a declaração.\nNão produza propaganda personalizada para grupos ideológicos.\nAvalie interesse editorial, clareza, fidelidade e retenção.\nO TITLE abaixo é só uma sugestão interna: avalie a FALA (transcrição), não esse título.\nSe houver PERGUNTA INCLUÍDA, ela aparece antes da resposta no vídeo e conta para autossuficiência.\n\nResponda somente com o JSON pedido, em português.`;\n\nconst today = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\nconst schema = {\n  type: 'object',\n  additionalProperties: false,\n  required: ['hook_score','context_score','conflict_score','current_score','clarity_score','retention_score',\n    'penalty_meaning_change','penalty_missing_context','penalty_slow_start','penalty_repetitive',\n    'penalty_title_needs_exaggeration','penalty_abrupt_end','penalty_unfaithful_context','risk','reason','suggested_hook','main_topic'],\n  properties: {\n    hook_score: { type: 'integer', minimum: 0, maximum: 25 },\n    context_score: { type: 'integer', minimum: 0, maximum: 20 },\n    conflict_score: { type: 'integer', minimum: 0, maximum: 15 },\n    current_score: { type: 'integer', minimum: 0, maximum: 15 },\n    clarity_score: { type: 'integer', minimum: 0, maximum: 10 },\n    retention_score: { type: 'integer', minimum: 0, maximum: 15 },\n    penalty_meaning_change: { type: 'boolean' },\n    penalty_missing_context: { type: 'boolean' },\n    penalty_slow_start: { type: 'boolean' },\n    penalty_repetitive: { type: 'boolean' },\n    penalty_title_needs_exaggeration: { type: 'boolean' },\n    penalty_abrupt_end: { type: 'boolean' },\n    penalty_unfaithful_context: { type: 'boolean' },\n    risk: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },\n    reason: { type: 'string' },\n    suggested_hook: { type: 'string' },\n    main_topic: { type: 'string' },\n  },\n};\n\nreturn $input.all().map(({ json: clip }) => ({\n  json: {\n    ...clip,\n    request: {\n      provider: 'auto',\n      system: SYSTEM,\n      schema,\n      prompt: `DATA DE HOJE: ${today}\n\nFONTE: ${clip.source_channel} — \"${clip.source_title}\"\n\nINPUT\n\nTITLE:\n${clip.title}\n\nCONTEXTO EXIBIDO NA TELA:\n${clip.context_text || '(nenhum)'}\n\nPERGUNTA INCLUÍDA NO VÍDEO:\n${clip.question || '(nenhuma)'}\n\nTRANSCRIPT (resposta):\n${clip.transcript}\n\nSCORE DO SELECIONADOR (0-10):\n${clip.viral_score}\n\nVIRAL REASON:\n${clip.viral_reason}\n\nDURATION:\n${clip.duration}s`,\n    },\n  },\n}));"
       }
     },
     {
@@ -300,7 +300,7 @@
         200
       ],
       "parameters": {
-        "jsCode": "// Validates each judge response and computes the final score deterministically.\nconst MAX = { hook_score: 25, context_score: 20, conflict_score: 15, current_score: 15, clarity_score: 10, retention_score: 15 };\nconst PENALTIES = {\n  penalty_meaning_change: 20, penalty_missing_context: 20, penalty_slow_start: 15,\n  penalty_repetitive: 10, penalty_title_needs_exaggeration: 20,\n};\nconst clips = $('BUILD JUDGE REQUEST').all();\n\nreturn $input.all().map((item, i) => {\n  const { request, ...clip } = clips[i].json;\n  const res = item.json;\n  const j = res?.json;\n\n  const problems = [];\n  if (!res?.ok) problems.push(`${res?.error_code ?? 'LLM_FAILED'}: ${res?.error_message ?? 'no response'}`);\n  else if (!j || typeof j !== 'object') problems.push('LLM_INVALID_JSON: missing json');\n  else {\n    for (const [k, max] of Object.entries(MAX)) {\n      if (!Number.isInteger(j[k]) || j[k] < 0 || j[k] > max) problems.push(`LLM_INVALID_JSON: ${k}=${j[k]}`);\n    }\n    for (const k of Object.keys(PENALTIES)) if (typeof j[k] !== 'boolean') problems.push(`LLM_INVALID_JSON: ${k}`);\n    if (!['LOW', 'MEDIUM', 'HIGH'].includes(j.risk)) problems.push(`LLM_INVALID_JSON: risk=${j.risk}`);\n  }\n\n  if (problems.length) {\n    return { json: { ...clip, judge_ok: false, judge_error: problems.join('; '), score: null, risk: null } };\n  }\n\n  const base = Object.keys(MAX).reduce((s, k) => s + j[k], 0);\n  const penalty = Object.entries(PENALTIES).reduce((s, [k, v]) => s + (j[k] ? v : 0), 0);\n  return {\n    json: {\n      ...clip,\n      judge_ok: true,\n      judge_provider: res.provider,\n      judge_model: res.model,\n      score_base: base,\n      score_penalty: penalty,\n      score: Math.max(0, base - penalty),\n      ...j,\n    },\n  };\n});"
+        "jsCode": "// Validates each judge response and computes the final score deterministically.\nconst MAX = { hook_score: 25, context_score: 20, conflict_score: 15, current_score: 15, clarity_score: 10, retention_score: 15 };\nconst PENALTIES = {\n  penalty_meaning_change: 20, penalty_missing_context: 20, penalty_slow_start: 15,\n  penalty_repetitive: 10, penalty_title_needs_exaggeration: 20,\n  penalty_abrupt_end: 15, penalty_unfaithful_context: 20,\n};\nconst clips = $('BUILD JUDGE REQUEST').all();\n\nreturn $input.all().map((item, i) => {\n  const { request, ...clip } = clips[i].json;\n  const res = item.json;\n  const j = res?.json;\n\n  const problems = [];\n  if (!res?.ok) problems.push(`${res?.error_code ?? 'LLM_FAILED'}: ${res?.error_message ?? 'no response'}`);\n  else if (!j || typeof j !== 'object') problems.push('LLM_INVALID_JSON: missing json');\n  else {\n    for (const [k, max] of Object.entries(MAX)) {\n      if (!Number.isInteger(j[k]) || j[k] < 0 || j[k] > max) problems.push(`LLM_INVALID_JSON: ${k}=${j[k]}`);\n    }\n    for (const k of Object.keys(PENALTIES)) if (typeof j[k] !== 'boolean') problems.push(`LLM_INVALID_JSON: ${k}`);\n    if (!['LOW', 'MEDIUM', 'HIGH'].includes(j.risk)) problems.push(`LLM_INVALID_JSON: risk=${j.risk}`);\n  }\n\n  if (problems.length) {\n    return { json: { ...clip, judge_ok: false, judge_error: problems.join('; '), score: null, risk: null } };\n  }\n\n  const base = Object.keys(MAX).reduce((s, k) => s + j[k], 0);\n  const penalty = Object.entries(PENALTIES).reduce((s, [k, v]) => s + (j[k] ? v : 0), 0);\n  return {\n    json: {\n      ...clip,\n      judge_ok: true,\n      judge_provider: res.provider,\n      judge_model: res.model,\n      score_base: base,\n      score_penalty: penalty,\n      score: Math.max(0, base - penalty),\n      ...j,\n    },\n  };\n});"
       }
     },
     {
@@ -341,7 +341,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ video_id: $json.source_video_id, clip_id: $json.clip_id, start: $json.start, end: $json.end }) }}"
+        "jsonBody": "={{ JSON.stringify({ video_id: $json.source_video_id, clip_id: $json.clip_id, parts: $json.parts, context_text: $json.question ? '' : $json.context_text, cover_band: 'auto', source_label: $json.source_channel, sentence_fixes: $json.sentence_fixes }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {
@@ -363,7 +363,7 @@
         200
       ],
       "parameters": {
-        "jsCode": "const res = $input.first().json;\nif (!res?.job_id) throw new Error(`RENDER_SUBMIT_FAILED: ${JSON.stringify(res).slice(0, 300)}`);\nreturn [{ json: { ...$('RANK & SELECT').first().json, job_id: res.job_id } }];"
+        "jsCode": "const res = $input.first().json;\nif (!res?.job_id) throw new Error(`RENDER_SUBMIT_FAILED: ${JSON.stringify(res).slice(0, 300)}`);\nreturn [{ json: { ...$('APPLY PROOFREAD').first().json, job_id: res.job_id } }];"
       }
     },
     {
@@ -470,6 +470,66 @@
       ],
       "parameters": {
         "jsCode": "const ctx = $input.first().json;\nconst { result, job_id, job_status, polls, ...clip } = ctx;\nif (result.width !== 1080 || result.height !== 1920) throw new Error(`RENDER_FAILED: unexpected size ${result.width}x${result.height}`);\nreturn [{ json: { ...clip, status: clip.status, video_file: result.container_path, video_file_name: result.file_name,\n  render: { width: result.width, height: result.height, duration: result.duration, shots: result.shots, fit_ratio: result.fit_ratio } } }];"
+      }
+    },
+    {
+      "id": "d1",
+      "name": "BUILD PROOFREAD REQUEST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Proofreads the captions of the selected clip: only evident ASR errors, never style or meaning.\nconst clip = $input.first().json;\nconst prep = $('BUILD FINDER REQUEST').first().json.result;\nconst ids = new Set();\nfor (const p of clip.parts) for (let i = p.start_id; i <= p.end_id; i++) ids.add(i);\nconst sentences = prep.sentences.filter((s) => ids.has(s.id));\nconst around = prep.sentences.filter((s) => s.id >= Math.min(...ids) - 4 && s.id <= Math.max(...ids) + 2);\n\nconst SYSTEM = `Você revisa legendas geradas por transcrição automática (Whisper) de um vídeo em português.\n\nCorrija SOMENTE erros evidentes de transcrição: nomes próprios, números, datas, siglas,\ninstituições, e palavras trocadas por outras de som parecido que o CONTEXTO deixa claro\n(ex.: \"presos do Rio de Janeiro\" quando o assunto são os presos do 8 de janeiro).\n\nNÃO reescreva o estilo, NÃO corrija a gramática da fala, NÃO remova hesitações ou repetições,\nNÃO resuma, NÃO mude o sentido. Na dúvida, não corrija.\n\nRetorne apenas as frases que precisam de correção, com o texto COMPLETO corrigido da frase,\ne em \"changes\" descreva cada troca no formato \"antes → depois\".`;\n\nconst schema = {\n  type: 'object', additionalProperties: false, required: ['fixes'],\n  properties: { fixes: { type: 'array', items: {\n    type: 'object', additionalProperties: false, required: ['id', 'text', 'changes'],\n    properties: { id: { type: 'integer' }, text: { type: 'string' }, changes: { type: 'array', items: { type: 'string' } } },\n  } } },\n};\n\nreturn [{ json: { ...clip, request: { provider: 'auto', system: SYSTEM, schema, prompt:\n`VÍDEO: \"${prep.title}\" — ${prep.channel}\n\nCONTEXTO (frases ao redor, não corrigir):\n${around.map((s) => `[${s.id}] ${s.text}`).join('\\n')}\n\nFRASES A REVISAR:\n${sentences.map((s) => `[${s.id}] ${s.text}`).join('\\n')}` } } }];"
+      }
+    },
+    {
+      "id": "d2",
+      "name": "AI PROOFREAD",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3300,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8787/v1/complete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 600000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      }
+    },
+    {
+      "id": "d3",
+      "name": "APPLY PROOFREAD",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Applies proofreading fixes (only to sentences of this clip). Failures are logged, not fatal.\nconst res = $input.first().json;\nconst { request, ...clip } = $('BUILD PROOFREAD REQUEST').first().json;\nconst ids = new Set();\nfor (const p of clip.parts) for (let i = p.start_id; i <= p.end_id; i++) ids.add(i);\nconst fixes = {};\nconst changes = [];\nif (res?.ok && Array.isArray(res.json?.fixes)) {\n  for (const f of res.json.fixes) {\n    if (!ids.has(f.id) || !f.text?.trim()) continue;\n    fixes[String(f.id)] = f.text.trim();\n    changes.push(...(f.changes || []).map((c) => `[${f.id}] ${c}`));\n  }\n} else {\n  console.log(`PROOFREAD_SKIPPED: ${res?.error_code ?? 'no response'} ${res?.error_message ?? ''}`);\n}\nconsole.log(JSON.stringify({ proofread_changes: changes }));\nreturn [{ json: { ...clip, sentence_fixes: fixes, proofread_changes: changes } }];"
       }
     }
   ],
@@ -639,7 +699,7 @@
       "main": [
         [
           {
-            "node": "CLIPPER RENDER",
+            "node": "BUILD PROOFREAD REQUEST",
             "type": "main",
             "index": 0
           }
@@ -713,6 +773,39 @@
         [
           {
             "node": "WAIT RENDER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUILD PROOFREAD REQUEST": {
+      "main": [
+        [
+          {
+            "node": "AI PROOFREAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI PROOFREAD": {
+      "main": [
+        [
+          {
+            "node": "APPLY PROOFREAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "APPLY PROOFREAD": {
+      "main": [
+        [
+          {
+            "node": "CLIPPER RENDER",
             "type": "main",
             "index": 0
           }

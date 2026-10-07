@@ -1,7 +1,8 @@
 """Clipper HTTP service for n8n (same auth/token as the LLM bridge).
 
 POST /v1/prepare {source_url}                         -> {job_id}   download + transcribe
-POST /v1/render  {video_id, clip_id, start, end}      -> {job_id}   render 1080x1920 short
+POST /v1/render  {video_id, clip_id, parts: [{start_id, end_id, role}], context_text?,
+                  cover_band?: auto|off|[y0,y1], source_label?}  -> {job_id}   render 1080x1920 short
 GET  /v1/jobs/<job_id>                                -> {status: queued|running|done|error, result, error_code, error_message}
 GET  /healthz
 
@@ -86,14 +87,20 @@ def do_prepare(params: dict) -> dict:
     url = params['source_url']
     vid = pipeline.youtube_id(url)
     workdir = WORK_DIR / vid
-    info = pipeline.download(url, workdir)
-    prompt = f"{info.get('title') or ''}. Lucas Pavanato."
-    tr = pipeline.transcribe(workdir, prompt=prompt)
+    info = pipeline.download_audio(url, workdir)
+    video = pipeline.Background(pipeline.download_video, url, workdir)  # downloads while we transcribe
+    video.start()
+    tr = pipeline.transcribe(workdir, prompt=f"{info.get('title') or ''}. Lucas Pavanato.")
+    video.join()
+    if video.error:
+        raise video.error
+    band = pipeline.detect_overlay_band(workdir)
     return {
         'video_id': vid,
         'source_url': url,
         **info,
-        'segments': [{k: s[k] for k in ('id', 'start', 'end', 'text')} for s in tr['segments']],
+        'overlay_band': band,
+        'sentences': [{k: s[k] for k in ('id', 'start', 'end', 'text')} for s in tr['sentences']],
         'transcript_model': tr.get('model'),
     }
 
@@ -103,15 +110,31 @@ def do_render(params: dict) -> dict:
     if not re.fullmatch(r'[A-Za-z0-9_-]{11}', vid):
         raise pipeline.PipelineError('INVALID_PARAMS', 'video_id')
     workdir = WORK_DIR / vid
-    tr = json.loads((workdir / 'transcript.json').read_text())
-    start, end = float(params['start']), float(params['end'])
-    if not (0 <= start < end) or end - start > 180:
-        raise pipeline.PipelineError('INVALID_PARAMS', f'start={start} end={end}')
-    words = [w for s in tr['segments'] for w in s['words']]
-    clip_id = re.sub(r'[^A-Za-z0-9_-]', '', str(params.get('clip_id', 'clip')))[:40] or 'clip'
-    name = f"{time.strftime('%Y-%m-%d')}_{vid}_{clip_id}.mp4"
+    tr = pipeline.transcribe(workdir)
+    n = len(tr['sentences'])
+    parts = params.get('parts')
+    if not isinstance(parts, list) or not parts or not all(
+        isinstance(p, dict) and 0 <= int(p.get('start_id', -1)) <= int(p.get('end_id', -1)) < n for p in parts
+    ):
+        raise pipeline.PipelineError('INVALID_PARAMS', f'parts must be sentence ranges within 0..{n - 1}')
+
+    cover = params.get('cover_band', 'auto')
+    if cover == 'auto':
+        cover = pipeline.detect_overlay_band(workdir)
+    elif cover in (None, 'off', False):
+        cover = None
+    elif not (isinstance(cover, list) and len(cover) == 2 and 0 <= cover[0] < cover[1] <= 1):
+        raise pipeline.PipelineError('INVALID_PARAMS', 'cover_band must be auto|off|[y0,y1]')
+
+    clip_id = re.sub(r'[^A-Za-z0-9_-]', '', str(params.get('clip_id', 'clip')))[:60] or 'clip'
+    name = f"{time.strftime('%Y-%m-%d')}_{clip_id}.mp4"
     out = DOWNLOADS_DIR / name
-    res = pipeline.render(workdir, start, end, out, words)
+    res = pipeline.render(workdir, tr, parts, out,
+                          context_text=(params.get('context_text') or '').strip()[:140] or None,
+                          cover_band=cover,
+                          source_label=str(params.get('source_label') or '')[:40],
+                          sentence_fixes={str(k): str(v)[:1000] for k, v in (params.get('sentence_fixes') or {}).items()
+                                          if str(k).isdigit() and int(k) < n})
     return {**res, 'file_name': name, 'container_path': f'/files/{name}'}
 
 
@@ -180,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
             if length > 1_000_000:
                 raise ValueError('body too large')
             params = json.loads(self.rfile.read(length) or b'{}')
-            required = ['source_url'] if kind == 'prepare' else ['video_id', 'start', 'end']
+            required = ['source_url'] if kind == 'prepare' else ['video_id', 'parts']
             missing = [k for k in required if params.get(k) in (None, '')]
             if missing:
                 raise ValueError(f'missing {missing}')

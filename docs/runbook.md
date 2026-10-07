@@ -25,7 +25,7 @@ Executar pela CLI (porta do task broker precisa ser outra, a 5679 é do n8n prin
 ```bash
 docker exec -e N8N_RUNNERS_BROKER_PORT=5690 pavanatto-n8n n8n execute --id=pavanattoPilot01 --rawOutput
 ```
-`PAVANATTO - 01 - PILOT`: no node CONFIG, `vizard_project_id` reaproveita um projeto Vizard
+`PAVANATO - 01 - PILOT`: no node CONFIG, `vizard_project_id` reaproveita um projeto Vizard
 já processado (não gasta minutos). Deixe vazio para processar uma URL nova.
 Links de MP4 do Vizard expiram em 7 dias; rodar de novo gera links novos.
 
@@ -34,7 +34,7 @@ Links de MP4 do Vizard expiram em 7 dias; rodar de novo gera links novos.
 `clipper/server.py` (launchd `com.pavanatto.clipper`, porta 8788, mesmo token da bridge):
 download (yt-dlp, 1080p H.264) → transcrição (mlx-whisper large-v3-turbo, palavra a palavra)
 → render 1080×1920 (reframe por rosto/falante ativo via MediaPipe, legendas com palavra
-destacada, marca PAVANATTO AGORA, áudio normalizado). Venv, modelos e vídeos em
+destacada, marca PAVANATO AGORA, áudio normalizado). Venv, modelos e vídeos em
 `/Volumes/MacNVMe/pavanatto-cuts/` (`clipper-venv`, `clipper-cache`, `work/<video_id>`).
 
 | Ação | Comando |

@@ -1,4 +1,4 @@
-# Pavanatto Cuts Automation
+# Pavanato Cuts Automation
 
 Pipeline n8n que transforma uma URL do YouTube em um Short (Vizard → IA editorial → YouTube).
 Plano completo: `docs/plan.md` (local, não versionado). Operação: [docs/runbook.md](docs/runbook.md). IA via assinaturas Claude/Codex: [docs/llm-bridge.md](docs/llm-bridge.md).
