@@ -68,6 +68,10 @@ pessoa fala = PROCESS) → limite de uploads (padrão 2 por rodada, 5 por dia) �
 - Pessoas monitoradas: Data Table `watchlist` no n8n (subject_name, subject_notes, queries, channel_urls,
   formats = short | long | both, misspellings, active).
 - Rodar agora: `scripts/run-discovery.sh` (ou `--dry` para só classificar).
+- **Fila de revisão:** `http://<TAILSCALE_IP>:8090/review` (mesma senha dos arquivos) — itens REVIEW/DEFERRED
+  com botões Gerar Short / Gerar longo / Ignorar, e os vídeos gerados com link para o Studio
+  (workflow `RADAR PATRIOTA - 03 - REVIEW`).
+- Vídeos com falha técnica (status ERROR) são tentados de novo na rodada seguinte; REJECTED não.
 - Pausar a automação: Data Table → `active=false` em todas as linhas, ou despublicar o workflow 00.
 
 ## Vídeo longo (16:9)

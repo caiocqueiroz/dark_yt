@@ -83,12 +83,26 @@ def find(workdir: Path, stem: str) -> Path | None:
 
 # --- download ----------------------------------------------------------------
 
+def run_ytdlp(cmd: list[str], attempts: int = 3) -> None:
+    """yt-dlp with retries: YouTube intermittently answers 403 to downloads that work a minute later."""
+    import time
+
+    for i in range(attempts):
+        try:
+            run(cmd, 'VIDEO_DOWNLOAD_FAILED')
+            return
+        except PipelineError:
+            if i == attempts - 1:
+                raise
+            time.sleep(15 * 3 ** i)
+
+
 def download_audio(url: str, workdir: Path) -> dict:
     """Audio + metadata first: enough to transcribe while the video downloads."""
     workdir.mkdir(parents=True, exist_ok=True)
     if not find(workdir, 'audio'):
-        run([YTDLP, '--no-playlist', '--no-progress', '-f', 'ba[ext=m4a]/ba', '--write-info-json',
-             '-o', str(workdir / 'audio.%(ext)s'), url], 'VIDEO_DOWNLOAD_FAILED')
+        run_ytdlp([YTDLP, '--no-playlist', '--no-progress', '-f', 'ba[ext=m4a]/ba', '--write-info-json',
+                   '-o', str(workdir / 'audio.%(ext)s'), url])
     if not find(workdir, 'audio'):
         raise PipelineError('VIDEO_DOWNLOAD_FAILED', 'audio not created')
     info_path = workdir / 'audio.info.json'
@@ -107,8 +121,8 @@ def download_video(url: str, workdir: Path) -> Path:
     """Video only, highest bitrate up to 1080p (YouTube 'Premium' VP9 when offered)."""
     v = find(workdir, 'video')
     if not v:
-        run([YTDLP, '--no-playlist', '--no-progress', '-f', 'bv*[height<=1080]', '-S', 'res:1080,tbr',
-             '-o', str(workdir / 'video.%(ext)s'), url], 'VIDEO_DOWNLOAD_FAILED')
+        run_ytdlp([YTDLP, '--no-playlist', '--no-progress', '-f', 'bv*[height<=1080]', '-S', 'res:1080,tbr',
+                   '-o', str(workdir / 'video.%(ext)s'), url])
         v = find(workdir, 'video')
     if not v:
         raise PipelineError('VIDEO_DOWNLOAD_FAILED', 'video not created')

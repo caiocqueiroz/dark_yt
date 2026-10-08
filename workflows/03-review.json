@@ -1,0 +1,414 @@
+{
+  "id": "radarReview03",
+  "name": "RADAR PATRIOTA - 03 - REVIEW",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "errorWorkflow": "pavanatoErrors99"
+  },
+  "nodes": [
+    {
+      "name": "List Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "7d1c0a52-radar-review-list",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "radar-review",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "id": "rv00",
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "name": "LOAD DISCOVERED",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "discovered_videos"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "rv01",
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "name": "LOAD PROCESSED",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "processed_videos"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "rv02",
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "name": "BUILD LIST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// Review queue: candidates waiting for a human decision + recent outputs.\nconst since = Date.now() - 7 * 86400 * 1000;\nconst seen = $('LOAD DISCOVERED').all().map((i) => i.json).filter((r) => r.video_id);\nconst queue = seen.filter((r) => ['REVIEW', 'DEFERRED'].includes(r.decision) && new Date(r.discovered_at).getTime() > since)\n  .sort((a, b) => new Date(b.published_at) - new Date(a.published_at));\nconst latest = new Map();\nfor (const r of queue) if (!latest.has(r.video_id)) latest.set(r.video_id, r);  // DEFERRED rows repeat per run\nconst outputs = $('LOAD PROCESSED').all().map((i) => i.json).filter((r) => r.youtube_id && !String(r.youtube_id).endsWith(':dryrun'))\n  .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 30);\nreturn [{ json: { queue: [...latest.values()], outputs } }];"
+      },
+      "id": "rv03",
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "name": "RESPOND LIST",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "rv04",
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "name": "Action Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "7d1c0a52-radar-review-act",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "radar-review-action",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "id": "rv05",
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "name": "FIND CANDIDATE",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "discovered_videos"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "video_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Action Webhook').first().json.body.video_id }}"
+            }
+          ]
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "rv06",
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "name": "LOAD WATCHLIST",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "watchlist"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "rv07",
+      "position": [
+        1540,
+        300
+      ]
+    },
+    {
+      "name": "APPLY ACTION",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// Applies a review decision: short | long | both | ignore.\nconst b = $('Action Webhook').first().json.body || {};\nconst action = String(b.action || '');\nif (!/^[A-Za-z0-9_-]{11}$/.test(b.video_id || '') || !['short', 'long', 'both', 'ignore'].includes(action)) {\n  throw new Error('INVALID_PARAMS: video_id/action');\n}\nconst row = $('FIND CANDIDATE').all().map((i) => i.json).find((r) => r.video_id === b.video_id);\nif (!row) throw new Error(`NOT_FOUND: ${b.video_id} not in discovered_videos`);\nconst watch = $('LOAD WATCHLIST').all().map((i) => i.json).find((w) => w.subject_name === row.subject_name) || {};\nconst base = { source_url: row.url, subject_name: row.subject_name, subject_notes: watch.subject_notes || '',\n  subject_misspellings: String(watch.misspellings || '').split(',').map((x) => x.trim()).filter(Boolean),\n  allow_below_threshold: false, upload: true };\nconst starts = [];\nif (action === 'short' || action === 'both') starts.push({ path: 'pavanato-pilot', body: base });\nif (action === 'long' || action === 'both') starts.push({ path: 'radar-longform', body: { ...base, mode: 'best_of', target_minutes: 6 } });\nreturn [{ json: { video_id: row.video_id, decision: action === 'ignore' ? 'IGNORE' : `APPROVED_${action.toUpperCase()}`,\n  reason: `revisão manual: ${action}`, starts } }];"
+      },
+      "id": "rv08",
+      "position": [
+        1760,
+        300
+      ]
+    },
+    {
+      "name": "UPDATE CANDIDATE",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "discovered_videos"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "video_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.video_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "decision": "={{ $json.decision }}",
+            "reason": "={{ $json.reason }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "rv09",
+      "position": [
+        1980,
+        300
+      ]
+    },
+    {
+      "name": "STARTS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "return $('APPLY ACTION').first().json.starts.map((s) => ({ json: s }));"
+      },
+      "id": "rv10",
+      "position": [
+        2200,
+        300
+      ]
+    },
+    {
+      "name": "START PIPELINE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/webhook/{{ $json.path }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "id": "rv11",
+      "position": [
+        2420,
+        300
+      ]
+    },
+    {
+      "name": "RESPOND ACTION",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "executeOnce": true,
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, video_id: $('APPLY ACTION').first().json.video_id, decision: $('APPLY ACTION').first().json.decision }) }}",
+        "options": {}
+      },
+      "id": "rv12",
+      "position": [
+        2640,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "List Webhook": {
+      "main": [
+        [
+          {
+            "node": "LOAD DISCOVERED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOAD DISCOVERED": {
+      "main": [
+        [
+          {
+            "node": "LOAD PROCESSED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOAD PROCESSED": {
+      "main": [
+        [
+          {
+            "node": "BUILD LIST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUILD LIST": {
+      "main": [
+        [
+          {
+            "node": "RESPOND LIST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action Webhook": {
+      "main": [
+        [
+          {
+            "node": "FIND CANDIDATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FIND CANDIDATE": {
+      "main": [
+        [
+          {
+            "node": "LOAD WATCHLIST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOAD WATCHLIST": {
+      "main": [
+        [
+          {
+            "node": "APPLY ACTION",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "APPLY ACTION": {
+      "main": [
+        [
+          {
+            "node": "UPDATE CANDIDATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UPDATE CANDIDATE": {
+      "main": [
+        [
+          {
+            "node": "RESPOND ACTION",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "STARTS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "STARTS": {
+      "main": [
+        [
+          {
+            "node": "START PIPELINE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
