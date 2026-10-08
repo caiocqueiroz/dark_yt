@@ -1,0 +1,859 @@
+{
+  "id": "radarDiscovery00",
+  "name": "RADAR PATRIOTA - 00 - DISCOVERY",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "errorWorkflow": "pavanatoErrors99"
+  },
+  "nodes": [
+    {
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6-22/2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "dc00",
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "parameters": {},
+      "id": "dc01",
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "3c2b9e41-radar-discovery-00",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "radar-discovery",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "id": "dc02",
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "name": "CONFIG",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// Discovery settings (override per run via webhook body).\nconst c = {\n  channel_name: 'Radar Patriota',\n  max_age_hours: 72,          // only videos published in the last N hours\n  min_duration_s: 240,        // sources shorter than this are skipped (Shorts, teasers)\n  long_min_source_s: 1200,    // a long-form cut needs a source of at least 20 min\n  max_process_per_run: 2,\n  max_uploads_per_day: 5,     // YouTube quota: ~1600 units per upload, 10k/day\n  auto_process: true,         // false = classify and record only\n  per_source: 15,\n};\nlet body = {};\ntry { body = $('Webhook').first().json.body || {}; } catch { /* schedule/manual */ }\nfor (const k of Object.keys(c)) if (body[k] !== undefined) c[k] = typeof c[k] === 'number' ? Number(body[k]) : (typeof c[k] === 'boolean' ? body[k] === true || body[k] === 'true' : body[k]);\nreturn [{ json: { ...c, run_id: `${$execution.id}`, started_at: new Date().toISOString() } }];"
+      },
+      "id": "dc03",
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "name": "ENSURE WATCHLIST",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "executeOnce": true,
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "watchlist",
+        "columns": {
+          "column": [
+            {
+              "name": "subject_name",
+              "type": "string"
+            },
+            {
+              "name": "subject_notes",
+              "type": "string"
+            },
+            {
+              "name": "queries",
+              "type": "string"
+            },
+            {
+              "name": "channel_urls",
+              "type": "string"
+            },
+            {
+              "name": "formats",
+              "type": "string"
+            },
+            {
+              "name": "misspellings",
+              "type": "string"
+            },
+            {
+              "name": "active",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": true
+        }
+      },
+      "id": "dc04",
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "name": "ENSURE DISCOVERED",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "executeOnce": true,
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "discovered_videos",
+        "columns": {
+          "column": [
+            {
+              "name": "video_id",
+              "type": "string"
+            },
+            {
+              "name": "subject_name",
+              "type": "string"
+            },
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "channel",
+              "type": "string"
+            },
+            {
+              "name": "channel_id",
+              "type": "string"
+            },
+            {
+              "name": "url",
+              "type": "string"
+            },
+            {
+              "name": "published_at",
+              "type": "date"
+            },
+            {
+              "name": "duration_s",
+              "type": "number"
+            },
+            {
+              "name": "source_type",
+              "type": "string"
+            },
+            {
+              "name": "recommendation",
+              "type": "string"
+            },
+            {
+              "name": "decision",
+              "type": "string"
+            },
+            {
+              "name": "format",
+              "type": "string"
+            },
+            {
+              "name": "reason",
+              "type": "string"
+            },
+            {
+              "name": "discovered_at",
+              "type": "date"
+            },
+            {
+              "name": "run_id",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": true
+        }
+      },
+      "id": "dc05",
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "name": "LOAD WATCHLIST",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "watchlist"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "dc06",
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "name": "WATCHLIST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// Active subjects from the watchlist table; seeds it on first run.\nconst rows = $input.all().map((i) => i.json).filter((r) => r.subject_name);\nconst DEFAULT = [{\n  subject_name: 'Lucas Pavanato',\n  subject_notes: 'Grafia correta: Pavanato (um T). Deputado federal eleito por São Paulo (PL), ex-vereador.',\n  queries: 'Lucas Pavanato, Pavanato',\n  channel_urls: 'https://www.youtube.com/@LucasPavanato',\n  formats: 'short',\n  misspellings: 'Pavanatto',\n  active: true,\n}];\nconst split = (s) => String(s || '').split(',').map((x) => x.trim()).filter(Boolean);\nconst source = rows.length ? rows : DEFAULT;\nconst subjects = source.filter((r) => r.active !== false && r.active !== 0).map((r) => ({\n  subject_name: r.subject_name, subject_notes: r.subject_notes || '', queries: split(r.queries || r.subject_name),\n  channels: split(r.channel_urls), formats: String(r.formats || 'short').toLowerCase(), misspellings: split(r.misspellings),\n}));\nif (!subjects.length) return [];\nreturn [{ json: { subjects, seed: rows.length ? [] : DEFAULT } }];"
+      },
+      "id": "dc07",
+      "position": [
+        1540,
+        300
+      ]
+    },
+    {
+      "name": "Seed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "s1",
+              "leftValue": "={{ $json.seed.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dc08",
+      "position": [
+        1760,
+        300
+      ]
+    },
+    {
+      "name": "SEED ROWS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "return $input.first().json.seed.map((r) => ({ json: r }));"
+      },
+      "id": "dc09",
+      "position": [
+        1980,
+        300
+      ]
+    },
+    {
+      "name": "INSERT WATCHLIST",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "watchlist"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "dc10",
+      "position": [
+        2200,
+        300
+      ]
+    },
+    {
+      "name": "CLIPPER DISCOVER",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "executeOnce": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8788/v1/discover",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ queries: $('WATCHLIST').first().json.subjects.flatMap((s) => s.queries), channels: $('WATCHLIST').first().json.subjects.flatMap((s) => s.channels), per_source: $('CONFIG').first().json.per_source }) }}",
+        "options": {
+          "timeout": 600000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 10000,
+      "id": "dc11",
+      "position": [
+        2420,
+        300
+      ]
+    },
+    {
+      "name": "LOAD SEEN",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "discovered_videos"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "dc12",
+      "position": [
+        2640,
+        300
+      ]
+    },
+    {
+      "name": "LOAD PROCESSED",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "processed_videos"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "dc13",
+      "position": [
+        2860,
+        300
+      ]
+    },
+    {
+      "name": "FILTER NEW",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// New candidates only: not seen before (except DEFERRED), not processed, not ours, plausible length.\nconst S = $('CONFIG').first().json;\nconst W = $('WATCHLIST').first().json.subjects;\nconst res = $('CLIPPER DISCOVER').first().json;\nif (!Array.isArray(res?.items)) throw new Error(`DISCOVER_FAILED: ${JSON.stringify(res).slice(0, 300)}`);\nconst seen = new Map($('LOAD SEEN').all().map((i) => [i.json.video_id, i.json.decision]));\nconst processed = new Set($('LOAD PROCESSED').all().map((i) => String(i.json.youtube_id || '').split(':')[0]));\nconst subjectOf = (item) => {\n  for (const s of W) {\n    if (item.found_by.some((f) => s.queries.some((q) => f === `search:${q}`) || s.channels.some((c) => f === `channel:${c}`))) return s;\n  }\n  return null;\n};\nconst out = [];\nfor (const it of res.items) {\n  const s = subjectOf(it);\n  if (!s || processed.has(it.video_id)) continue;\n  const prev = seen.get(it.video_id);\n  if (prev && prev !== 'DEFERRED') continue;\n  if ((it.channel || '').toLowerCase() === S.channel_name.toLowerCase()) continue;\n  if (it.duration != null && it.duration < S.min_duration_s) continue;\n  out.push({ ...it, subject_name: s.subject_name, official: it.found_by.some((f) => f.startsWith('channel:')) });\n}\nconsole.log(JSON.stringify({ found: res.items.length, new: out.length, errors: res.errors }));\nif (!out.length) return [];\nreturn [{ json: { candidates: out.slice(0, 50), ids: out.slice(0, 50).map((c) => c.video_id).join(',') } }];"
+      },
+      "id": "dc14",
+      "position": [
+        3080,
+        300
+      ]
+    },
+    {
+      "name": "YT METADATA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "executeOnce": true,
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&maxResults=50&id={{ $json.ids }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "youtubeOAuth00001",
+          "name": "YouTube (Radar Patriota)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "id": "dc15",
+      "position": [
+        3300,
+        300
+      ]
+    },
+    {
+      "name": "ENRICH",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// Adds publish date / duration / live status from the YouTube API (videos.list = 1 quota unit).\nconst S = $('CONFIG').first().json;\nconst { candidates } = $('FILTER NEW').first().json;\nconst meta = new Map(($input.first().json.items || []).map((v) => [v.id, v]));\nconst iso = (d) => { const m = String(d || '').match(/P(?:(\\d+)D)?T?(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?/) || [];\n  return (+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0); };\nconst cutoff = Date.now() - S.max_age_hours * 3600 * 1000;\nconst out = [];\nfor (const c of candidates) {\n  const v = meta.get(c.video_id);\n  if (!v) continue;\n  if (v.snippet.liveBroadcastContent && v.snippet.liveBroadcastContent !== 'none') continue; // live/upcoming\n  const published = new Date(v.snippet.publishedAt);\n  const duration = iso(v.contentDetails.duration);\n  if (published.getTime() < cutoff || duration < S.min_duration_s) continue;\n  out.push({ ...c, title: v.snippet.title, channel: v.snippet.channelTitle, channel_id: v.snippet.channelId,\n    published_at: published.toISOString(), duration_s: duration, description: (v.snippet.description || '').slice(0, 600) });\n}\nconsole.log(JSON.stringify({ enriched: out.length }));\nif (!out.length) return [];\nreturn [{ json: { candidates: out } }];"
+      },
+      "id": "dc16",
+      "position": [
+        3520,
+        300
+      ]
+    },
+    {
+      "name": "BUILD SOURCE REQUEST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// Source validation (docs/plan.md §36) for all candidates in one call.\nconst S = $('CONFIG').first().json;\nconst W = $('WATCHLIST').first().json.subjects;\nconst { candidates } = $input.first().json;\nconst SYSTEM = `Você faz a triagem de fontes do canal editorial independente \"${S.channel_name}\", que publica\ntrechos de declarações públicas de: ${W.map((s) => `${s.subject_name} (${s.subject_notes})`).join('; ')}.\n\nPara cada vídeo, classifique:\n- source_type: OFFICIAL (canal da própria pessoa), INTERVIEW, PODCAST, NEWS, INSTITUTIONAL (Câmara,\n  Senado, partidos, governo), CLIP_CHANNEL (canal de cortes de terceiros), REUPLOAD, UNKNOWN.\n- primary_source_probability e reupload_probability: 0–100. Priorize fontes primárias.\n- subject_speaks_probability: 0–100, chance de a PESSOA indicada FALAR no vídeo (não só ser assunto).\n- recommendation: PROCESS (fonte primária, ele fala, conteúdo com potencial), REVIEW (dúvida) ou IGNORE\n  (corte de terceiros, reupload, ele não fala, conteúdo irrelevante).\n- reason: uma frase.\nNão avalie se concorda politicamente.`;\nconst schema = { type: 'object', additionalProperties: false, required: ['items'], properties: { items: { type: 'array', items: {\n  type: 'object', additionalProperties: false,\n  required: ['video_id', 'source_type', 'primary_source_probability', 'reupload_probability', 'subject_speaks_probability', 'recommendation', 'reason'],\n  properties: { video_id: { type: 'string' }, source_type: { type: 'string', enum: ['OFFICIAL', 'INTERVIEW', 'PODCAST', 'NEWS', 'INSTITUTIONAL', 'CLIP_CHANNEL', 'REUPLOAD', 'UNKNOWN'] },\n    primary_source_probability: { type: 'integer' }, reupload_probability: { type: 'integer' }, subject_speaks_probability: { type: 'integer' },\n    recommendation: { type: 'string', enum: ['PROCESS', 'REVIEW', 'IGNORE'] }, reason: { type: 'string' } } } } } };\nconst list = candidates.map((c) => `- video_id: ${c.video_id}\\n  pessoa: ${c.subject_name}\\n  título: ${c.title}\\n  canal: ${c.channel}${c.official ? ' (canal oficial da pessoa)' : ''}\\n  duração: ${Math.round(c.duration_s / 60)} min\\n  descrição: ${c.description.replace(/\\s+/g, ' ').slice(0, 300)}`).join('\\n');\nreturn [{ json: { request: { provider: 'auto', system: SYSTEM, schema, prompt: `VÍDEOS:\\n${list}` } } }];"
+      },
+      "id": "dc17",
+      "position": [
+        3740,
+        300
+      ]
+    },
+    {
+      "name": "AI SOURCE VALIDATION",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8787/v1/complete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 600000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "id": "dc18",
+      "position": [
+        3960,
+        300
+      ]
+    },
+    {
+      "name": "DECIDE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// Policy (docs/plan.md §14) + daily upload cap. Emits one row per candidate for discovered_videos.\nconst S = $('CONFIG').first().json;\nconst W = new Map($('WATCHLIST').first().json.subjects.map((s) => [s.subject_name, s]));\nconst { candidates } = $('ENRICH').first().json;\nconst res = $input.first().json;\nif (!res?.ok || !Array.isArray(res.json?.items)) throw new Error(`${res?.error_code ?? 'LLM_INVALID_JSON'}: source validation ${res?.error_message ?? ''}`);\nconst v = new Map(res.json.items.map((x) => [x.video_id, x]));\n\nconst today = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });\nconst usedToday = $('LOAD PROCESSED').all().map((i) => i.json)\n  .filter((r) => ['UPLOADED', 'SELECTED', 'PROCESSING'].includes(r.status) && !String(r.youtube_id).endsWith(':dryrun')\n    && new Date(r.updated_at).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }) === today).length;\nlet budget = Math.max(0, Math.min(S.max_process_per_run, S.max_uploads_per_day - usedToday));\n\nconst PRIORITY = { OFFICIAL: 0, INTERVIEW: 1, PODCAST: 1, INSTITUTIONAL: 2, NEWS: 3, UNKNOWN: 4 };\nconst rows = candidates.map((c) => {\n  const x = v.get(c.video_id) || { source_type: 'UNKNOWN', recommendation: 'REVIEW', reason: 'sem classificação', subject_speaks_probability: 0 };\n  const type = c.official ? 'OFFICIAL' : x.source_type;\n  let decision = x.recommendation;\n  if (['CLIP_CHANNEL', 'REUPLOAD'].includes(type)) decision = 'IGNORE';\n  else if (x.subject_speaks_probability < 50) decision = 'IGNORE';\n  else if (['NEWS', 'INSTITUTIONAL', 'UNKNOWN'].includes(type) && decision === 'PROCESS') decision = 'REVIEW';\n  const subj = W.get(c.subject_name);\n  const wantsLong = /long|both/.test(subj?.formats || '') && c.duration_s >= S.long_min_source_s;\n  const wantsShort = /short|both/.test(subj?.formats || 'short');\n  const format = wantsShort && wantsLong ? 'both' : wantsLong ? 'long' : 'short';\n  return { c, x, type, decision, format, prio: PRIORITY[type] ?? 5 };\n});\nrows.sort((a, b) => a.prio - b.prio || new Date(b.c.published_at) - new Date(a.c.published_at));\nfor (const r of rows) {\n  if (r.decision !== 'PROCESS') continue;\n  const cost = r.format === 'both' ? 2 : 1;\n  if (!S.auto_process || budget < cost) { r.decision = 'DEFERRED'; continue; }\n  budget -= cost;\n}\nconsole.log(JSON.stringify({ usedToday, decisions: rows.map((r) => `${r.c.video_id}:${r.type}:${r.decision}:${r.format}`) }));\nreturn rows.map((r) => ({ json: {\n  video_id: r.c.video_id, subject_name: r.c.subject_name, title: r.c.title, channel: r.c.channel, channel_id: r.c.channel_id,\n  url: r.c.url, published_at: r.c.published_at, duration_s: r.c.duration_s, source_type: r.type,\n  recommendation: r.x.recommendation, decision: r.decision, format: r.format, reason: r.x.reason,\n  discovered_at: new Date().toISOString(), run_id: S.run_id,\n} }));"
+      },
+      "id": "dc19",
+      "position": [
+        4180,
+        300
+      ]
+    },
+    {
+      "name": "SAVE DISCOVERED",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "discovered_videos"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "dc20",
+      "position": [
+        4400,
+        300
+      ]
+    },
+    {
+      "name": "TRIGGERS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// Starts the Short / long-form workflows for PROCESS decisions (webhooks on this same n8n).\nconst W = new Map($('WATCHLIST').first().json.subjects.map((s) => [s.subject_name, s]));\nconst out = [];\nfor (const { json: r } of $('DECIDE').all()) {\n  if (r.decision !== 'PROCESS') continue;\n  const s = W.get(r.subject_name) || {};\n  const base = { source_url: r.url, subject_name: r.subject_name, subject_notes: s.subject_notes || '',\n    subject_misspellings: s.misspellings || [], allow_below_threshold: false, upload: true };\n  if (r.format !== 'long') out.push({ json: { path: 'pavanato-pilot', body: base } });\n  if (r.format !== 'short') out.push({ json: { path: 'radar-longform', body: { ...base, mode: 'best_of', target_minutes: 6 } } });\n}\nreturn out;"
+      },
+      "id": "dc21",
+      "position": [
+        4620,
+        300
+      ]
+    },
+    {
+      "name": "START PIPELINE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/webhook/{{ $json.path }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 3000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "llmBridgeAuth0001",
+          "name": "LLM Bridge (local)"
+        }
+      },
+      "id": "dc22",
+      "position": [
+        4840,
+        300
+      ]
+    },
+    {
+      "name": "SUMMARY",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const rows = $('DECIDE').all().map((i) => i.json);\nconst by = (d) => rows.filter((r) => r.decision === d).map((r) => `${r.subject_name}: ${r.title} (${r.channel})`);\nreturn [{ json: { run_id: $('CONFIG').first().json.run_id, process: by('PROCESS'), review: by('REVIEW'), deferred: by('DEFERRED'), ignored: by('IGNORE').length } }];"
+      },
+      "id": "dc23",
+      "position": [
+        5060,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "ENSURE WATCHLIST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ENSURE WATCHLIST": {
+      "main": [
+        [
+          {
+            "node": "ENSURE DISCOVERED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ENSURE DISCOVERED": {
+      "main": [
+        [
+          {
+            "node": "LOAD WATCHLIST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOAD WATCHLIST": {
+      "main": [
+        [
+          {
+            "node": "WATCHLIST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WATCHLIST": {
+      "main": [
+        [
+          {
+            "node": "Seed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seed?": {
+      "main": [
+        [
+          {
+            "node": "SEED ROWS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CLIPPER DISCOVER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SEED ROWS": {
+      "main": [
+        [
+          {
+            "node": "INSERT WATCHLIST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "INSERT WATCHLIST": {
+      "main": [
+        [
+          {
+            "node": "CLIPPER DISCOVER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CLIPPER DISCOVER": {
+      "main": [
+        [
+          {
+            "node": "LOAD SEEN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOAD SEEN": {
+      "main": [
+        [
+          {
+            "node": "LOAD PROCESSED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOAD PROCESSED": {
+      "main": [
+        [
+          {
+            "node": "FILTER NEW",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FILTER NEW": {
+      "main": [
+        [
+          {
+            "node": "YT METADATA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YT METADATA": {
+      "main": [
+        [
+          {
+            "node": "ENRICH",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ENRICH": {
+      "main": [
+        [
+          {
+            "node": "BUILD SOURCE REQUEST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUILD SOURCE REQUEST": {
+      "main": [
+        [
+          {
+            "node": "AI SOURCE VALIDATION",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI SOURCE VALIDATION": {
+      "main": [
+        [
+          {
+            "node": "DECIDE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DECIDE": {
+      "main": [
+        [
+          {
+            "node": "SAVE DISCOVERED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SAVE DISCOVERED": {
+      "main": [
+        [
+          {
+            "node": "TRIGGERS",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TRIGGERS": {
+      "main": [
+        [
+          {
+            "node": "START PIPELINE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}

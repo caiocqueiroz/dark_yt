@@ -115,6 +115,35 @@ def download_video(url: str, workdir: Path) -> Path:
     return v
 
 
+def discover(queries: list[str], channels: list[str], per_source: int = 15) -> list[dict]:
+    """Free discovery via yt-dlp (no API quota): newest search results + latest uploads of channels."""
+    import urllib.parse
+
+    sources = [(f'https://www.youtube.com/results?search_query={urllib.parse.quote_plus(q)}&sp=CAI%253D', 'search', q)
+               for q in queries if q.strip()]
+    sources += [(c.rstrip('/') + ('' if c.rstrip('/').endswith('/videos') else '/videos'), 'channel', c)
+                for c in channels if c.strip().startswith('https://www.youtube.com/')]
+    found: dict[str, dict] = {}
+    errors = []
+    for url, kind, origin in sources:
+        p = subprocess.run([YTDLP, '--flat-playlist', '-J', '--no-warnings', '--extractor-args', 'youtube:lang=pt',
+                            '--playlist-end', str(per_source), url], capture_output=True, text=True, timeout=180)
+        if p.returncode != 0:
+            errors.append(f'{origin}: {p.stderr[-200:]}')
+            continue
+        data = json.loads(p.stdout or '{}')
+        for e in data.get('entries') or []:
+            vid = e.get('id') or ''
+            if not re.fullmatch(r'[A-Za-z0-9_-]{11}', vid):  # skips channel/playlist entries
+                continue
+            item = found.setdefault(vid, {
+                'video_id': vid, 'url': f'https://www.youtube.com/watch?v={vid}', 'title': e.get('title'),
+                'channel': e.get('channel') or data.get('channel'), 'channel_id': e.get('channel_id') or data.get('channel_id'),
+                'duration': e.get('duration'), 'found_by': []})
+            item['found_by'].append(f'{kind}:{origin}')
+    return list(found.values()) + [{'error': e} for e in errors]
+
+
 class Background(threading.Thread):
     def __init__(self, fn, *args):
         super().__init__(daemon=True)

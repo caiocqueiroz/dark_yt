@@ -57,6 +57,19 @@ destacada, marca PAVANATO AGORA, áudio normalizado). Venv, modelos e vídeos em
 Python precisa da permissão "Volumes Removíveis" (ou Acesso Total ao Disco), senão trava
 no boot lendo o venv.
 
+## Discovery (automático)
+
+Workflow `RADAR PATRIOTA - 00 - DISCOVERY`, a cada 2h (06–22h): busca gratuita (yt-dlp: busca por data +
+canais oficiais) → metadados via API (1 unidade) → classificação da fonte por IA → política do plano
+(cortes de terceiros/reupload = IGNORE; NEWS/INSTITUTIONAL/UNKNOWN = REVIEW; fonte primária em que a
+pessoa fala = PROCESS) → limite de uploads (padrão 2 por rodada, 5 por dia) → dispara Short/longo
+(sempre PRIVATE). Tudo fica em `discovered_videos` (decision: PROCESS, REVIEW, DEFERRED, IGNORE).
+
+- Pessoas monitoradas: Data Table `watchlist` no n8n (subject_name, subject_notes, queries, channel_urls,
+  formats = short | long | both, misspellings, active).
+- Rodar agora: `scripts/run-discovery.sh` (ou `--dry` para só classificar).
+- Pausar a automação: Data Table → `active=false` em todas as linhas, ou despublicar o workflow 00.
+
 ## Vídeo longo (16:9)
 
 ```bash

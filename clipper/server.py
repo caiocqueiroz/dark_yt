@@ -234,6 +234,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized():
             return self.send(401, {'error_code': 'UNAUTHORIZED'})
+        if self.path == '/v1/discover':  # synchronous: a few yt-dlp listings, no downloads
+            try:
+                length = int(self.headers.get('content-length') or 0)
+                params = json.loads(self.rfile.read(length) or b'{}')
+                out = pipeline.discover([str(q) for q in params.get('queries') or []][:20],
+                                        [str(c) for c in params.get('channels') or []][:20],
+                                        min(30, int(params.get('per_source') or 15)))
+            except Exception as e:  # noqa: BLE001
+                return self.send(500, {'error_code': 'DISCOVER_FAILED', 'error_message': str(e)[:500]})
+            items = [x for x in out if 'video_id' in x]
+            return self.send(200, {'items': items, 'errors': [x['error'] for x in out if 'error' in x]})
         kind = {'/v1/prepare': 'prepare', '/v1/render': 'render'}.get(self.path)
         if not kind:
             return self.send(404, {'error_code': 'NOT_FOUND'})

@@ -156,7 +156,7 @@
         300
       ],
       "parameters": {
-        "jsCode": "const err = $('FORMAT ERROR').first().json;\nconst rows = $input.all().map((i) => i.json).filter((r) => r.youtube_id);\nif (!rows.length) return [];\nreturn rows.map((r) => ({ json: {\n  youtube_id: r.youtube_id, status: 'ERROR',\n  error_reason: `${err.error_code} @ ${err.step}: ${err.error_message}`.slice(0, 500),\n  updated_at: new Date().toISOString(),\n} }));"
+        "jsCode": "const err = $('FORMAT ERROR').first().json;\nconst rows = $input.all().map((i) => i.json).filter((r) => r.youtube_id);\nif (!rows.length) return [];\nreturn rows.map((r) => ({ json: {\n  youtube_id: r.youtube_id,\n  // No clip good enough is an editorial outcome, not a failure.\n  status: ['ALL_CLIPS_REJECTED', 'NO_CLIPS_RETURNED'].includes(err.error_code) ? 'REJECTED' : 'ERROR',\n  error_reason: `${err.error_code} @ ${err.step}: ${err.error_message}`.slice(0, 500),\n  updated_at: new Date().toISOString(),\n} }));"
       }
     },
     {
